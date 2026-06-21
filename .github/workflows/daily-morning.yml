@@ -23,6 +23,10 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: 📦 安装依赖
+        run: |
+          pip install -r cloud_push/requirements.txt
+
       - name: 📰 采集新闻 & 生成报告
         env:
           FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
