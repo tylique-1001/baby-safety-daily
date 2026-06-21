@@ -1,0 +1,47 @@
+name: 婴儿安全日报 · 晚间更新
+
+on:
+  schedule:
+    # 北京时间 18:30 = UTC 10:30
+    - cron: '30 10 * * *'
+  workflow_dispatch:  # 支持手动触发
+
+permissions:
+  contents: write
+
+jobs:
+  push-evening:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout 仓库
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 🐍 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 📰 采集晚间增量新闻 & 生成报告
+        env:
+          FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+          FEISHU_USER_OPEN_ID: ${{ secrets.FEISHU_USER_OPEN_ID }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          cd cloud_push
+          python3 main.py --mode evening
+
+      - name: 📤 提交 HTML 报告到仓库
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/ || true
+          git diff --staged --quiet || (git commit -m "📊 自动更新晚间日报 HTML $(date +%Y-%m-%d)" && git push)
+
+      - name: 🔔 失败通知
+        if: failure()
+        run: |
+          echo "❌ 晚间推送失败，请检查日志"
+          # 可接入 Slack/飞书 webhook 发送失败通知
