@@ -8,15 +8,13 @@ news_fetcher.py - 新闻采集模块
 import datetime
 import json
 import re
-import socket
 import time
+import subprocess
+import tempfile
+import os
 import urllib.request
 import urllib.error
-import concurrent.futures
 from html.parser import HTMLParser
-
-# 🔒 多重超时防御：socket 级 + 线程级
-socket.setdefaulttimeout(15)
 
 # ===== RSS 数据源 =====
 RSS_FEEDS = [
@@ -49,46 +47,60 @@ KEYWORDS_EN = [
 ]
 
 
-def _fetch_url_thread(url, result_holder, timeout):
-    """在线程中执行的实际请求（不打印，避免线程间输出混乱）"""
-    try:
-        req = urllib.request.Request(
-            url,
-            headers={"User-Agent": "Mozilla/5.0 (compatible; BabySafetyBot/1.0)"}
-        )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            charset = "utf-8"
-            content_type = resp.headers.get("Content-Type", "")
-            if "charset=" in content_type:
-                charset = content_type.split("charset=")[-1].split(";")[0].strip()
-            result_holder["body"] = resp.read().decode(charset, errors="replace")
-    except Exception as e:
-        result_holder["error"] = str(e)
-
-
 def fetch_url(url, timeout=10):
-    """获取 URL 内容（线程级硬超时，GitHub Actions 安全）"""
-    result = {}
+    """获取 URL 内容 — 使用 subprocess curl，OS 级硬超时保证必杀"""
     t0 = time.time()
+    tmp_path = None
+    proc = None
     try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(_fetch_url_thread, url, result, timeout)
-            future.result(timeout=timeout + 5)  # 额外5秒容差
+        # 写临时文件避免 shell 注入和编码问题
+        tmp_fd, tmp_path = tempfile.mkstemp(suffix=".html", prefix="newsfetch_")
+        os.close(tmp_fd)
+        
+        proc = subprocess.Popen(
+            ["curl", "-sS", "--max-time", str(timeout), "--connect-timeout", str(min(timeout, 8)),
+             "-H", "User-Agent: Mozilla/5.0 (compatible; BabySafetyBot/1.0)",
+             "-L",  # follow redirects
+             "-o", tmp_path,
+             url],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        proc.wait(timeout=timeout + 5)
+        
         elapsed = time.time() - t0
-        if "body" in result:
-            print(f"    ✓ {url[:60]} ({len(result['body'])} 字符, {elapsed:.1f}s)")
-            return result["body"]
-        else:
-            print(f"    ⚠️ {url[:60]} 失败 ({elapsed:.1f}s): {result.get('error', 'unknown')}")
+        if proc.returncode != 0:
+            print(f"    ⚠️ {url[:60]} curl exit={proc.returncode} ({elapsed:.1f}s)")
             return ""
-    except concurrent.futures.TimeoutError:
+        
+        try:
+            with open(tmp_path, "r", encoding="utf-8", errors="replace") as f:
+                body = f.read()
+        except Exception:
+            with open(tmp_path, "rb") as f:
+                body = f.read().decode("utf-8", errors="replace")
+        
+        print(f"    ✓ {url[:60]} ({len(body)} 字符, {elapsed:.1f}s)")
+        return body
+        
+    except subprocess.TimeoutExpired:
         elapsed = time.time() - t0
-        print(f"    ⛔ {url[:60]} 硬超时 ({elapsed:.1f}s)，强制跳过")
+        if proc:
+            proc.kill()
+            proc.wait(timeout=3)
+        print(f"    ⛔ {url[:60]} 硬超时 ({elapsed:.1f}s)，已强杀进程")
         return ""
     except Exception as e:
         elapsed = time.time() - t0
+        if proc and proc.poll() is None:
+            proc.kill()
         print(f"    ⚠️ {url[:60]} 异常 ({elapsed:.1f}s): {e}")
         return ""
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
 
 
 def parse_rss(xml_content):
