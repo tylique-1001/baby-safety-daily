@@ -1,4 +1,4 @@
-name: 婴儿安全日报 · 早间版
+name: "婴儿安全日报 · 早间版"
 
 on:
   schedule:
@@ -14,56 +14,46 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
-      - name: 📦 安装依赖
+      - name: Install deps
         run: pip install -r cloud_push/requirements.txt
-
-      - name: 🔍 步骤1: 采集新闻
+      - name: Fetch news
         run: |
           cd cloud_push
-          python3 -u -c "
-import sys, time
-sys.path.insert(0, '.')
+          python3 -u -c '
+import sys, time, json
+sys.path.insert(0, ".")
 t0 = time.time()
 from news_fetcher import fetch_news, format_for_report
-print(f'import ok ({time.time()-t0:.1f}s)')
-items = fetch_news(days_back=3, mode='morning')
-print(f'fetch done: {len(items)} items ({time.time()-t0:.1f}s)')
+items = fetch_news(days_back=3, mode="morning")
+print(f"fetch: {len(items)} items ({time.time()-t0:.1f}s)")
 urgent, important = format_for_report(items)
-print(f'format done: urgent={len(urgent)} important={len(important)}')
-# save to temp for next step
-import json, tempfile
-with open('/tmp/news_data.json', 'w') as f:
-    json.dump({'urgent': urgent, 'important': important, 'total': len(items)}, f, ensure_ascii=False)
-print('data saved')
-"
-
-      - name: 📄 步骤2: 生成报告
+with open("/tmp/news_data.json", "w") as f:
+    json.dump({"urgent": urgent, "important": important}, f)
+print(f"data saved: urgent={len(urgent)} important={len(important)}")
+'
+      - name: Generate report
         run: |
           cd cloud_push
-          python3 -u -c "
-import sys, json, datetime, os
-sys.path.insert(0, '.')
+          python3 -u -c '
+import sys, json, datetime
+sys.path.insert(0, ".")
 from main import generate_html_report, get_tips
-with open('/tmp/news_data.json') as f:
+with open("/tmp/news_data.json") as f:
     data = json.load(f)
 today = datetime.date.today()
 tips = get_tips(today)
-print(f'tips generated: {len(tips)}')
-html = generate_html_report(data['urgent'], data['important'], tips, today, 'morning')
-print(f'html generated: {len(html)} chars')
-import os as _os; _os.makedirs('../docs', exist_ok=True)
-fname = f\"../docs/{today.isoformat()}-婴儿安全日报.html\"
-with open(fname, 'w', encoding='utf-8') as f:
+html = generate_html_report(data["urgent"], data["important"], tips, today, "morning")
+import os
+os.makedirs("../docs", exist_ok=True)
+fname = f"../docs/{today.isoformat()}-婴儿安全日报.html"
+with open(fname, "w", encoding="utf-8") as f:
     f.write(html)
-print(f'file written: {fname}')
-"
-
-      - name: ✈️ 步骤3: 发送飞书
+print(f"report written: {fname} ({len(html)} chars)")
+'
+      - name: Send Feishu
         env:
           FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
           FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
@@ -71,25 +61,22 @@ print(f'file written: {fname}')
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           cd cloud_push
-          python3 -u -c "
+          python3 -u -c '
 import sys, json, datetime, os
-sys.path.insert(0, '.')
+sys.path.insert(0, ".")
 from feishu_sender import send_daily_report
-with open('/tmp/news_data.json') as f:
+with open("/tmp/news_data.json") as f:
     data = json.load(f)
 today = datetime.date.today()
-repo = os.environ.get('GITHUB_REPOSITORY', '')
-cloud_url = ''
-if repo:
-    cloud_url = f'https://{repo.split(\"/\")[0]}.github.io/{repo.split(\"/\")[1]}/docs/{today.isoformat()}-婴儿安全日报.html'
-print(f'cloud_url: {cloud_url}')
-ok = send_daily_report(data['urgent'], data['important'], [], cloud_url, today, is_evening=False)
-print(f'send result: {\"SUCCESS\" if ok else \"FAILED\"}')
-"
-
-      - name: 📤 提交 HTML 报告到仓库
+repo = os.environ.get("GITHUB_REPOSITORY", "")
+cloud_url = f"https://{repo.split(chr(47))[0]}.github.io/{repo.split(chr(47))[1]}/docs/{today.isoformat()}-婴儿安全日报.html" if repo else ""
+print(f"cloud_url: {cloud_url}")
+ok = send_daily_report(data["urgent"], data["important"], [], cloud_url, today, is_evening=False)
+print(f"send: {'OK' if ok else 'FAIL'}")
+'
+      - name: Commit report
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add docs/ || true
-          git diff --staged --quiet || (git commit -m "📊 自动更新日报 HTML $(date +%Y-%m-%d)" && git push)
+          git diff --staged --quiet || (git commit -m "Daily report $(date +%Y-%m-%d)" && git push)
