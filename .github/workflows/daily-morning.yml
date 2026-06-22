@@ -16,6 +16,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -39,7 +42,16 @@ jobs:
 
       - name: Commit report
         run: |
+          set -x
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add docs/ || true
-          git diff --staged --quiet || (git commit -m "Daily report $(date +%Y-%m-%d)" && git push)
+          git pull --rebase origin main
+          ls -la docs/
+          git add docs/
+          git status
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Daily report $(date +%Y-%m-%d)"
+            git push origin main
+          fi
