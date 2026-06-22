@@ -1,0 +1,19 @@
+name: 🔍 网络诊断
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: 🐍 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 🔍 运行诊断
+        run: |
+          cd cloud_push
+          python3 -u diagnose.py
