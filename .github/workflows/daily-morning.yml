@@ -36,14 +36,14 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           PYTHONUNBUFFERED: 1
         run: |
-          echo "=== Step: cd cloud_push ==="
+          echo "=== TRACE: cd cloud_push ==="
           cd cloud_push
-          echo "=== Step: import test ==="
-          python3 -c "from news_fetcher import fetch_news; print('import OK')" 2>&1
-          python3 -c "from feishu_sender import send_daily_report; print('feishu import OK')" 2>&1
-          echo "=== Step: main.py ==="
-          timeout 180 python3 main.py --mode morning 2>&1
-          echo "=== main.py exit=$? ==="
+          echo "=== TRACE: import test ==="
+          python3 -c "from news_fetcher import fetch_news; print('import OK')"
+          python3 -c "from feishu_sender import send_daily_report; print('feishu import OK')"
+          echo "=== TRACE: main.py ==="
+          python3 -u main.py --mode morning
+          echo "=== TRACE: main.py exit=$? ==="
 
       - name: 📤 提交 HTML 报告到仓库
         run: |

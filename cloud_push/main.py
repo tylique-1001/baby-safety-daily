@@ -265,20 +265,25 @@ def main():
     args = parser.parse_args()
 
     today = datetime.date.today()
-    print("🚀 开始执行云端推送 (mode=" + args.mode + ", date=" + str(today) + ")")
+    print("🚀 开始执行云端推送 (mode=" + args.mode + ", date=" + str(today) + ")", flush=True)
 
     is_evening = args.mode == "evening"
     news_items = fetch_news(days_back=3 if not is_evening else 1, mode=args.mode)
+    print("[TRACE] fetch_news done, " + str(len(news_items)) + " items", flush=True)
 
     urgent, important = format_for_report(news_items)
+    print("[TRACE] format_for_report done, urgent=" + str(len(urgent)) + " important=" + str(len(important)), flush=True)
+
     tips = get_tips(today)
+    print("[TRACE] get_tips done, " + str(len(tips)) + " tips", flush=True)
 
-    print("📄 生成 HTML 报告...")
+    print("📄 生成 HTML 报告...", flush=True)
     cloud_url, html_path = deploy_html_report(urgent, important, tips, today, args.mode)
-    print("   HTML 路径: " + str(html_path))
-    print("   Cloud URL: " + str(cloud_url or "(需要设置 GITHUB_REPOSITORY)"))
+    print("[TRACE] deploy_html_report done", flush=True)
+    print("   HTML 路径: " + str(html_path), flush=True)
+    print("   Cloud URL: " + str(cloud_url or "(需要设置 GITHUB_REPOSITORY)"), flush=True)
 
-    print("📤 发送飞书消息...")
+    print("📤 发送飞书消息...", flush=True)
     success = send_daily_report(
         urgent_news=urgent,
         important_news=important,
@@ -289,10 +294,10 @@ def main():
     )
 
     if success:
-        print("✅ 推送完成！")
+        print("✅ 推送完成！", flush=True)
         return 0
     else:
-        print("❌ 推送失败（可能是凭证未配置）")
+        print("❌ 推送失败（可能是凭证未配置）", flush=True)
         return 1
 
 
