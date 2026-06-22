@@ -38,8 +38,10 @@ def get_tips(date):
     import hashlib
     seed = date.isoformat().encode()
     indices = set()
+    attempt = 0
     while len(indices) < 3:
-        h = int(hashlib.md5(seed + len(indices).to_bytes(1, 'big')).hexdigest()[:2], 16)
+        attempt += 1
+        h = int(hashlib.md5(seed + str(attempt).encode()).hexdigest()[:2], 16)
         indices.add(h % len(tips_pool))
     return [tips_pool[i] for i in sorted(indices)]
 
