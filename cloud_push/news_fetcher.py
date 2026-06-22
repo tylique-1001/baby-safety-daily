@@ -12,10 +12,11 @@ import socket
 import time
 import urllib.request
 import urllib.error
+import concurrent.futures
 from html.parser import HTMLParser
 
-# 🔒 全局 socket 超时：防止 GitHub Actions 上因网络问题永久挂起
-socket.setdefaulttimeout(25)
+# 🔒 多重超时防御：socket 级 + 线程级
+socket.setdefaulttimeout(15)
 
 # ===== RSS 数据源 =====
 RSS_FEEDS = [
@@ -48,8 +49,8 @@ KEYWORDS_EN = [
 ]
 
 
-def fetch_url(url, timeout=15):
-    """获取 URL 内容"""
+def _fetch_url_thread(url, result_holder, timeout):
+    """在线程中执行的实际请求（不打印，避免线程间输出混乱）"""
     try:
         req = urllib.request.Request(
             url,
@@ -60,9 +61,33 @@ def fetch_url(url, timeout=15):
             content_type = resp.headers.get("Content-Type", "")
             if "charset=" in content_type:
                 charset = content_type.split("charset=")[-1].split(";")[0].strip()
-            return resp.read().decode(charset, errors="replace")
+            result_holder["body"] = resp.read().decode(charset, errors="replace")
     except Exception as e:
-        print(f"  ⚠️ 获取失败 {url[:50]}: {e}")
+        result_holder["error"] = str(e)
+
+
+def fetch_url(url, timeout=10):
+    """获取 URL 内容（线程级硬超时，GitHub Actions 安全）"""
+    result = {}
+    t0 = time.time()
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(_fetch_url_thread, url, result, timeout)
+            future.result(timeout=timeout + 5)  # 额外5秒容差
+        elapsed = time.time() - t0
+        if "body" in result:
+            print(f"    ✓ {url[:60]} ({len(result['body'])} 字符, {elapsed:.1f}s)")
+            return result["body"]
+        else:
+            print(f"    ⚠️ {url[:60]} 失败 ({elapsed:.1f}s): {result.get('error', 'unknown')}")
+            return ""
+    except concurrent.futures.TimeoutError:
+        elapsed = time.time() - t0
+        print(f"    ⛔ {url[:60]} 硬超时 ({elapsed:.1f}s)，强制跳过")
+        return ""
+    except Exception as e:
+        elapsed = time.time() - t0
+        print(f"    ⚠️ {url[:60]} 异常 ({elapsed:.1f}s): {e}")
         return ""
 
 
@@ -121,7 +146,7 @@ def fetch_cpsc_recalls(days=3):
     try:
         # CPSC 召回列表页面
         url = "https://www.cpsc.gov/Recalls"
-        html = fetch_url(url)
+        html = fetch_url(url, timeout=12)
         if not html:
             return items
         
@@ -148,7 +173,7 @@ def fetch_fda_alerts():
     items = []
     try:
         url = "https://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts"
-        html = fetch_url(url)
+        html = fetch_url(url, timeout=12)
         if not html:
             return items
         
@@ -182,10 +207,12 @@ def fetch_chinese_sources():
     
     for url, source_name in sources:
         try:
-            print(f"    → {source_name} ({url[:30]}...)")
-            html = fetch_url(url, timeout=8)  # 短超时，不可达就跳过
+            print(f"  [{source_name}] 开始请求...")
+            t0 = time.time()
+            html = fetch_url(url, timeout=8)
+            elapsed = time.time() - t0
             if not html or len(html) < 100:
-                print(f"    ⚠️ {source_name} 响应内容不足，跳过")
+                print(f"    ⚠️ {source_name} 响应内容不足以解析 ({elapsed:.1f}s)，跳过")
                 continue
             # 简单提取链接
             count = 0
@@ -215,20 +242,27 @@ def fetch_news(days_back=3, mode="morning"):
     主函数：采集新闻
     mode: "morning" = 全天新闻, "evening" = 仅增量（与早间报告对比）
     """
-    print(f"📰 开始采集新闻 (mode={mode})...")
+    t_start = time.time()
+    print(f"📰 开始采集新闻 (mode={mode}, timeout=15s/8s)...")
     all_items = []
     
-    # CPSC
-    print("  → CPSC 召回...")
+    # CPSC（美国政府网站，从 GitHub Actions US 机房访问应该快）
+    print(f"  [CPSC] 开始...")
+    t0 = time.time()
     all_items.extend(fetch_cpsc_recalls(days_back))
+    print(f"  [CPSC] 完成 ({time.time()-t0:.1f}s, 累计 {len(all_items)} 条)")
     
     # FDA
-    print("  → FDA 安全警告...")
+    print(f"  [FDA] 开始...")
+    t0 = time.time()
     all_items.extend(fetch_fda_alerts())
+    print(f"  [FDA] 完成 ({time.time()-t0:.1f}s, 累计 {len(all_items)} 条)")
     
-    # 中文来源
-    print("  → 中文来源...")
+    # 中文来源（可能从 GitHub Actions 访问慢，超时自动跳过）
+    print(f"  [中文源] 开始...")
+    t0 = time.time()
     all_items.extend(fetch_chinese_sources())
+    print(f"  [中文源] 完成 ({time.time()-t0:.1f}s, 累计 {len(all_items)} 条)")
     
     # 去重（按标题）
     seen_titles = set()
@@ -239,7 +273,8 @@ def fetch_news(days_back=3, mode="morning"):
             seen_titles.add(key)
             unique_items.append(item)
     
-    print(f"  ✓ 共采集 {len(unique_items)} 条（去重后）")
+    total_time = time.time() - t_start
+    print(f"  ✓ 共采集 {len(unique_items)} 条（去重后），总耗时 {total_time:.1f}s")
     return unique_items
 
 
