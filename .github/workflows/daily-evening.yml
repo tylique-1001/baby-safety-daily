@@ -12,6 +12,7 @@ permissions:
 jobs:
   push-evening:
     runs-on: ubuntu-latest
+    timeout-minutes: 15  # 15分钟硬超时
     steps:
       - name: 📥 Checkout 仓库
         uses: actions/checkout@v4
@@ -22,6 +23,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+
+      - name: 📦 安装依赖
+        run: |
+          pip install -r cloud_push/requirements.txt
 
       - name: 📰 采集晚间增量新闻 & 生成报告
         env:

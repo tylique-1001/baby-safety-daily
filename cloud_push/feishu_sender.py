@@ -145,12 +145,12 @@ def build_v9_card(urgent_news, important_news, tips, cloud_url, report_date, is_
     }
     
     # 紧急新闻
-    if urgend_news:
+    if urgent_news:
         card["elements"].append({
             "tag": "div",
             "text": {"tag": "lark_md", "content": "**🔴 紧急提醒**"},
         })
-        for news in urgend_news:
+        for news in urgent_news:
             card["elements"].append({
                 "tag": "div",
                 "text": {
@@ -266,7 +266,7 @@ if __name__ == "__main__":
     # 测试：发送一条测试消息
     print("🧪 测试模式：发送测试消息...")
     test_card = build_v9_card(
-        urgend_news=[{"title": "测试紧急新闻", "desc": "这是一条测试", "url": "https://www.cpsc.gov/", "source": "CPSC", "date": "2026-06-21", "severity": "urgent"}],
+        urgent_news=[{"title": "测试紧急新闻", "desc": "这是一条测试", "url": "https://www.cpsc.gov/", "source": "CPSC", "date": "2026-06-21", "severity": "urgent"}],
         important_news=[],
         tips=["测试贴士1", "测试贴士2"],
         cloud_url="https://example.com",

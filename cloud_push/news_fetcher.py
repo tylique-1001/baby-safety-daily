@@ -8,10 +8,14 @@ news_fetcher.py - 新闻采集模块
 import datetime
 import json
 import re
+import socket
 import time
 import urllib.request
 import urllib.error
 from html.parser import HTMLParser
+
+# 🔒 全局 socket 超时：防止 GitHub Actions 上因网络问题永久挂起
+socket.setdefaulttimeout(25)
 
 # ===== RSS 数据源 =====
 RSS_FEEDS = [
@@ -168,10 +172,9 @@ def fetch_fda_alerts():
 
 
 def fetch_chinese_sources():
-    """抓取中文来源（中国质量报、市场监管总局等）"""
+    """抓取中文来源（中国质量报、市场监管总局等）——失败不阻塞主流程"""
     items = []
     
-    # 尝试抓取中国质量报
     sources = [
         ("https://www.cqn.com.cn/", "中国质量报"),
         ("https://www.samr.gov.cn/xw/zj/", "市场监管总局"),
@@ -179,10 +182,13 @@ def fetch_chinese_sources():
     
     for url, source_name in sources:
         try:
-            html = fetch_url(url, timeout=10)
-            if not html:
+            print(f"    → {source_name} ({url[:30]}...)")
+            html = fetch_url(url, timeout=8)  # 短超时，不可达就跳过
+            if not html or len(html) < 100:
+                print(f"    ⚠️ {source_name} 响应内容不足，跳过")
                 continue
             # 简单提取链接
+            count = 0
             for m in re.finditer(r'<a[^>]+href="([^"]+)"[^>]*>([^<]*(?:婴儿|幼儿|儿童|召回|安全)[^<]*)</a>', html):
                 link = m.group(1)
                 title = m.group(2).strip()
@@ -196,8 +202,10 @@ def fetch_chinese_sources():
                         "severity": classify_severity(title, ""),
                         "date": datetime.date.today().isoformat(),
                     })
+                    count += 1
+            print(f"    ✓ {source_name} 找到 {count} 条")
         except Exception as e:
-            print(f"  ⚠️ {source_name} 抓取失败: {e}")
+            print(f"    ⚠️ {source_name} 抓取失败（已跳过）: {e}")
     
     return items[:10]
 
