@@ -2,12 +2,13 @@
 # -*- coding: utf-8 -*-
 """
 feishu_sender.py - 飞书消息发送模块
-使用飞书 Open API，无需本地 lark-cli
+使用 subprocess curl，OS 级硬超时，GitHub Actions 安全
 """
 
 import json
-import urllib.request
-import urllib.error
+import subprocess
+import tempfile
+import os
 import time
 
 # 从配置文件读取
@@ -19,59 +20,76 @@ except ImportError:
     FEISHU_USER_OPEN_ID = ""
 
 
+def _curl_post(url, json_body, timeout=20):
+    """用 curl 发 POST JSON 请求，OS 级硬超时"""
+    t0 = time.time()
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".json", prefix="feishu_")
+    os.close(tmp_fd)
+    proc = None
+    try:
+        proc = subprocess.Popen(
+            ["curl", "-sS",
+             "--max-time", str(timeout),
+             "--connect-timeout", "8",
+             "-H", "Content-Type: application/json",
+             "-X", "POST",
+             "-d", json_body,
+             "-o", tmp_path,
+             url],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        proc.wait(timeout=timeout + 5)
+        elapsed = time.time() - t0
+
+        if proc.returncode != 0:
+            print(f"    ⚠️ curl POST {url[:50]} exit={proc.returncode} ({elapsed:.1f}s)")
+            return None
+
+        with open(tmp_path, "r", encoding="utf-8", errors="replace") as f:
+            result = json.loads(f.read())
+        return result
+
+    except subprocess.TimeoutExpired:
+        elapsed = time.time() - t0
+        if proc:
+            proc.kill()
+        print(f"    ⛔ curl POST {url[:50]} 硬超时 ({elapsed:.1f}s)")
+        return None
+    except Exception as e:
+        elapsed = time.time() - t0
+        if proc and proc.poll() is None:
+            proc.kill()
+        print(f"    ⚠️ curl POST {url[:50]} 异常 ({elapsed:.1f}s): {e}")
+        return None
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+
+
 def get_access_token(app_id, app_secret):
     """获取飞书访问令牌"""
     url = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
-    data = json.dumps({
+    body = json.dumps({
         "app_id": app_id,
         "app_secret": app_secret,
-    }).encode("utf-8")
-    
-    req = urllib.request.Request(
-        url,
-        data=data,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
-            if result.get("code") == 0:
-                return result["tenant_access_token"]
-            else:
-                print(f"❌ 获取 token 失败: {result}")
-                return None
-    except Exception as e:
-        print(f"❌ 获取 token 异常: {e}")
+    }, ensure_ascii=False)
+
+    print("    → 请求飞书 token...", flush=True)
+    result = _curl_post(url, body, timeout=20)
+
+    if result is None:
+        print("❌ 获取 token 失败: 网络错误或超时")
         return None
 
-
-def send_text_message(token, open_id, content):
-    """发送纯文本消息"""
-    url = "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id"
-    data = json.dumps({
-        "receive_id": open_id,
-        "msg_type": "text",
-        "content": json.dumps({"text": content}),
-    }).encode("utf-8")
-    
-    req = urllib.request.Request(
-        url,
-        data=data,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {token}",
-        },
-        method="POST",
-    )
-    
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
-            return result.get("code") == 0, result
-    except Exception as e:
-        return False, {"error": str(e)}
+    if result.get("code") == 0:
+        print(f"    ✓ token 获取成功 (expire={result.get('expire', '?')}s)")
+        return result["tenant_access_token"]
+    else:
+        print(f"❌ 获取 token 失败: code={result.get('code')} msg={result.get('msg', '')}")
+        return None
 
 
 def send_interactive_card(token, open_id, card_json):
@@ -80,28 +98,66 @@ def send_interactive_card(token, open_id, card_json):
     card_json: 飞书卡片 JSON 对象
     """
     url = "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id"
-    data = json.dumps({
+    payload = json.dumps({
         "receive_id": open_id,
         "msg_type": "interactive",
         "content": json.dumps(card_json, ensure_ascii=False),
-    }).encode("utf-8")
-    
-    req = urllib.request.Request(
-        url,
-        data=data,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {token}",
-        },
-        method="POST",
-    )
-    
+    }, ensure_ascii=False)
+
+    headers = [
+        "-H", "Content-Type: application/json",
+        "-H", f"Authorization: Bearer {token}",
+    ]
+
+    t0 = time.time()
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".json", prefix="feishu_send_")
+    os.close(tmp_fd)
+    proc = None
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
-            return result.get("code") == 0, result
+        proc = subprocess.Popen(
+            ["curl", "-sS",
+             "--max-time", "20",
+             "--connect-timeout", "8",
+             *headers,
+             "-X", "POST",
+             "-d", payload,
+             "-o", tmp_path,
+             url],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        proc.wait(timeout=25)
+        elapsed = time.time() - t0
+
+        if proc.returncode != 0:
+            print(f"    ⚠️ 发送卡片 curl exit={proc.returncode} ({elapsed:.1f}s)")
+            return False, {"error": f"curl exit={proc.returncode}"}
+
+        with open(tmp_path, "r", encoding="utf-8", errors="replace") as f:
+            result = json.loads(f.read())
+
+        success = result.get("code") == 0
+        if not success:
+            print(f"    ⚠️ 飞书返回错误: code={result.get('code')} msg={result.get('msg','')}")
+        return success, result
+
+    except subprocess.TimeoutExpired:
+        elapsed = time.time() - t0
+        if proc:
+            proc.kill()
+        print(f"    ⛔ 发送卡片硬超时 ({elapsed:.1f}s)")
+        return False, {"error": "timeout"}
     except Exception as e:
+        elapsed = time.time() - t0
+        if proc and proc.poll() is None:
+            proc.kill()
+        print(f"    ⚠️ 发送卡片异常 ({elapsed:.1f}s): {e}")
         return False, {"error": str(e)}
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
 
 
 def build_v9_card(urgent_news, important_news, tips, cloud_url, report_date, is_evening=False):
@@ -112,18 +168,18 @@ def build_v9_card(urgent_news, important_news, tips, cloud_url, report_date, is_
     n_urgent = len(urgent_news)
     n_important = len(important_news)
     n_tips = len(tips)
-    
+
     # 日期显示
     date_str = report_date.strftime("%Y年%m月%d日")
     title = f"🛡️ 婴儿安全资讯日报 · {'晚间更新' if is_evening else '早间版'}"
     subtitle = f"{date_str} | 重点关注 {date_str} 安全动态"
-    
+
     # 统计摘要
     if is_evening:
         summary = f"今日新增：🔴 紧急 {n_urgent} 项 · 🟡 重要 {n_important} 项"
     else:
         summary = f"今日概况：🔴 紧急 {n_urgent} 项 · 🟡 重要 {n_important} 项 · 💡 贴士 {n_tips} 条"
-    
+
     # 构建卡片 JSON（飞书卡片格式）
     card = {
         "config": {"wide_screen_mode": True},
@@ -143,7 +199,7 @@ def build_v9_card(urgent_news, important_news, tips, cloud_url, report_date, is_
             {"tag": "hr"},
         ],
     }
-    
+
     # 紧急新闻
     if urgent_news:
         card["elements"].append({
@@ -170,7 +226,7 @@ def build_v9_card(urgent_news, important_news, tips, cloud_url, report_date, is_
                     },
                 ],
             })
-    
+
     # 重要提醒
     if important_news:
         card["elements"].append({"tag": "hr"})
@@ -197,7 +253,7 @@ def build_v9_card(urgent_news, important_news, tips, cloud_url, report_date, is_
                     },
                 ],
             })
-    
+
     # 贴士
     if tips:
         card["elements"].append({"tag": "hr"})
@@ -210,7 +266,7 @@ def build_v9_card(urgent_news, important_news, tips, cloud_url, report_date, is_
                 "tag": "div",
                 "text": {"tag": "lark_md", "content": f"• {tip}"},
             })
-    
+
     # CTA
     card["elements"].append({"tag": "hr"})
     cta_text = "📖 查看完整图文日报（含全部新闻来源链接）" if cloud_url else "完整报告生成中..."
@@ -218,7 +274,7 @@ def build_v9_card(urgent_news, important_news, tips, cloud_url, report_date, is_
         "tag": "div",
         "text": {"tag": "lark_md", "content": f"**{cta_text}**"},
     })
-    
+
     if cloud_url:
         card["elements"].append({
             "tag": "action",
@@ -231,7 +287,7 @@ def build_v9_card(urgent_news, important_news, tips, cloud_url, report_date, is_
                 },
             ],
         })
-    
+
     return card
 
 
@@ -241,19 +297,19 @@ def send_daily_report(urgent_news, important_news, tips, cloud_url, report_date,
         print("❌ 飞书凭证未配置，跳过发送")
         print("   请设置环境变量 FEISHU_APP_ID 和 FEISHU_APP_SECRET")
         return False
-    
+
     print("📤 获取飞书 access token...")
     token = get_access_token(FEISHU_APP_ID, FEISHU_APP_SECRET)
     if not token:
         print("❌ 获取 token 失败，中止发送")
         return False
-    
+
     print("📤 构建飞书卡片...")
     card = build_v9_card(urgent_news, important_news, tips, cloud_url, report_date, is_evening)
-    
+
     print("📤 发送飞书卡片...")
     success, result = send_interactive_card(token, FEISHU_USER_OPEN_ID, card)
-    
+
     if success:
         print("✅ 飞书卡片发送成功！")
         return True
@@ -263,8 +319,8 @@ def send_daily_report(urgent_news, important_news, tips, cloud_url, report_date,
 
 
 if __name__ == "__main__":
-    # 测试：发送一条测试消息
-    print("🧪 测试模式：发送测试消息...")
+    # 测试：打印卡片 JSON（不实际发送）
+    print("🧪 测试模式：生成测试卡片...")
     test_card = build_v9_card(
         urgent_news=[{"title": "测试紧急新闻", "desc": "这是一条测试", "url": "https://www.cpsc.gov/", "source": "CPSC", "date": "2026-06-21", "severity": "urgent"}],
         important_news=[],
