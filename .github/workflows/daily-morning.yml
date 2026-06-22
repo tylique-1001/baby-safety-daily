@@ -45,7 +45,6 @@ jobs:
           set -x
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git pull --rebase origin main
           ls -la docs/
           git add docs/
           git status
