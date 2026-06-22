@@ -5,6 +5,10 @@ on:
     # 每小时整点扫描 (UTC)
     - cron: '0 * * * *'
   workflow_dispatch:
+  push:
+    paths:
+      - 'cloud_push/**'
+      - '.github/workflows/**'
 
 permissions:
   contents: read

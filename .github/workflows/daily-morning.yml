@@ -5,6 +5,10 @@ on:
     # 北京时间 09:30 = UTC 01:30
     - cron: '30 1 * * *'
   workflow_dispatch:
+  push:
+    paths:
+      - 'cloud_push/**'
+      - '.github/workflows/**'
 
 permissions:
   contents: write
@@ -51,6 +55,6 @@ jobs:
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "Daily report $(date +%Y-%m-%d)"
+            git commit -m "Daily report $(date +%Y-%m-%d) [skip ci]"
             git push origin main
           fi
