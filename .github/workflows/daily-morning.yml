@@ -2,46 +2,90 @@ name: 婴儿安全日报 · 早间版
 
 on:
   schedule:
-    # 北京时间 09:30 = UTC 01:30
     - cron: '30 1 * * *'
-  workflow_dispatch:  # 支持手动触发
+  workflow_dispatch:
 
 permissions:
-  contents: write  # 需要写权限来提交生成的 HTML
+  contents: write
 
 jobs:
   push-morning:
     runs-on: ubuntu-latest
-    timeout-minutes: 15  # 15分钟硬超时，防止网络问题永久挂起
+    timeout-minutes: 15
     steps:
-      - name: 📥 Checkout 仓库
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: 🐍 设置 Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
       - name: 📦 安装依赖
-        run: |
-          pip install -r cloud_push/requirements.txt
+        run: pip install -r cloud_push/requirements.txt
 
-      - name: 📰 采集新闻 & 生成报告
+      - name: 🔍 步骤1: 采集新闻
+        run: |
+          cd cloud_push
+          python3 -u -c "
+import sys, time
+sys.path.insert(0, '.')
+t0 = time.time()
+from news_fetcher import fetch_news, format_for_report
+print(f'import ok ({time.time()-t0:.1f}s)')
+items = fetch_news(days_back=3, mode='morning')
+print(f'fetch done: {len(items)} items ({time.time()-t0:.1f}s)')
+urgent, important = format_for_report(items)
+print(f'format done: urgent={len(urgent)} important={len(important)}')
+# save to temp for next step
+import json, tempfile
+with open('/tmp/news_data.json', 'w') as f:
+    json.dump({'urgent': urgent, 'important': important, 'total': len(items)}, f, ensure_ascii=False)
+print('data saved')
+"
+
+      - name: 📄 步骤2: 生成报告
+        run: |
+          cd cloud_push
+          python3 -u -c "
+import sys, json, datetime, os
+sys.path.insert(0, '.')
+from main import generate_html_report, get_tips
+with open('/tmp/news_data.json') as f:
+    data = json.load(f)
+today = datetime.date.today()
+tips = get_tips(today)
+print(f'tips generated: {len(tips)}')
+html = generate_html_report(data['urgent'], data['important'], tips, today, 'morning')
+print(f'html generated: {len(html)} chars')
+import os as _os; _os.makedirs('../docs', exist_ok=True)
+fname = f\"../docs/{today.isoformat()}-婴儿安全日报.html\"
+with open(fname, 'w', encoding='utf-8') as f:
+    f.write(html)
+print(f'file written: {fname}')
+"
+
+      - name: ✈️ 步骤3: 发送飞书
         env:
           FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
           FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
           FEISHU_USER_OPEN_ID: ${{ secrets.FEISHU_USER_OPEN_ID }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          PYTHONUNBUFFERED: 1
         run: |
-          echo "=== TRACE: cd cloud_push ==="
           cd cloud_push
-          echo "=== TRACE: import test ==="
-          python3 -c "from news_fetcher import fetch_news; print('import OK')"
-          python3 -c "from feishu_sender import send_daily_report; print('feishu import OK')"
-          echo "=== TRACE: main.py ==="
-          python3 -u main.py --mode morning
-          echo "=== TRACE: main.py exit=$? ==="
+          python3 -u -c "
+import sys, json, datetime, os
+sys.path.insert(0, '.')
+from feishu_sender import send_daily_report
+with open('/tmp/news_data.json') as f:
+    data = json.load(f)
+today = datetime.date.today()
+repo = os.environ.get('GITHUB_REPOSITORY', '')
+cloud_url = ''
+if repo:
+    cloud_url = f'https://{repo.split(\"/\")[0]}.github.io/{repo.split(\"/\")[1]}/docs/{today.isoformat()}-婴儿安全日报.html'
+print(f'cloud_url: {cloud_url}')
+ok = send_daily_report(data['urgent'], data['important'], [], cloud_url, today, is_evening=False)
+print(f'send result: {\"SUCCESS\" if ok else \"FAILED\"}')
+"
 
       - name: 📤 提交 HTML 报告到仓库
         run: |
@@ -49,22 +93,3 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add docs/ || true
           git diff --staged --quiet || (git commit -m "📊 自动更新日报 HTML $(date +%Y-%m-%d)" && git push)
-
-      - name: 📤 发送飞书通知（如果上面的步骤没有发送）
-        if: always()
-        env:
-          FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
-          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
-          FEISHU_USER_OPEN_ID: ${{ secrets.FEISHU_USER_OPEN_ID }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-        run: |
-          # main.py 已包含发送逻辑，这里只是确保执行
-          echo "飞书推送状态请查看上方日志"
-
-      - name: 🔔 失败通知
-        if: failure()
-        uses: 8398a7/action-slack@v3
-        with:
-          status: ${{ job.status }}
-          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
-        continue-on-error: true
