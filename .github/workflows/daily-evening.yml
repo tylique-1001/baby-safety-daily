@@ -34,9 +34,11 @@ jobs:
           FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
           FEISHU_USER_OPEN_ID: ${{ secrets.FEISHU_USER_OPEN_ID }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          PYTHONUNBUFFERED: 1
         run: |
           cd cloud_push
-          python3 main.py --mode evening
+          timeout 180 python3 main.py --mode evening 2>&1
+          echo "main.py exit=$?"
 
       - name: 📤 提交 HTML 报告到仓库
         run: |
