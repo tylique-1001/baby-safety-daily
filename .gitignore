@@ -7,3 +7,4 @@ build/
 .env
 config_local.py
 *.html
+!docs/*.html

@@ -46,7 +46,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           ls -la docs/
-          git add docs/
+          git add -f docs/
           git status
           if git diff --staged --quiet; then
             echo "No changes to commit"
