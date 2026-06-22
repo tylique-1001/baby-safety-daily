@@ -1,0 +1,80 @@
+name: 🛡️ 推送看门狗 · 自愈
+
+on:
+  schedule:
+    # 每小时整点扫描 (UTC)
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  watchdog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: 🔍 检查报告是否存在
+        id: check
+        run: |
+          TODAY=$(TZ=Asia/Shanghai date +%Y-%m-%d)
+          BJ_HOUR=$(TZ=Asia/Shanghai date +%H)
+          
+          echo "📅 北京时间: $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')"
+          echo "today=${TODAY}" >> $GITHUB_OUTPUT
+          echo "bj_hour=${BJ_HOUR}" >> $GITHUB_OUTPUT
+
+          # --- 早间报告检查 (10:00-17:59) ---
+          if [ "$BJ_HOUR" -ge 10 ] && [ "$BJ_HOUR" -lt 18 ]; then
+            MORNING_FILE="docs/${TODAY}-婴儿安全日报.html"
+            MORNING_URL="https://raw.githubusercontent.com/tylique-1001/baby-safety-daily/main/${MORNING_FILE}"
+            HTTP=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 10 "$MORNING_URL" 2>/dev/null || echo "000")
+            if [ "$HTTP" != "200" ]; then
+              echo "❌ 早间报告缺失 (HTTP ${HTTP}) → 触发重新生成"
+              echo "trigger_morning=true" >> $GITHUB_OUTPUT
+            else
+              echo "✅ 早间报告已存在 (HTTP ${HTTP})"
+              echo "trigger_morning=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "⏭️  不在早间检查窗口 (10-17h), 跳过"
+            echo "trigger_morning=false" >> $GITHUB_OUTPUT
+          fi
+
+          # --- 晚间报告检查 (19:00-23:59) ---
+          if [ "$BJ_HOUR" -ge 19 ]; then
+            EVENING_FILE="docs/${TODAY}-婴儿安全日报-晚间更新.html"
+            EVENING_URL="https://raw.githubusercontent.com/tylique-1001/baby-safety-daily/main/${EVENING_FILE}"
+            HTTP=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 10 "$EVENING_URL" 2>/dev/null || echo "000")
+            if [ "$HTTP" != "200" ]; then
+              echo "❌ 晚间报告缺失 (HTTP ${HTTP}) → 触发重新生成"
+              echo "trigger_evening=true" >> $GITHUB_OUTPUT
+            else
+              echo "✅ 晚间报告已存在 (HTTP ${HTTP})"
+              echo "trigger_evening=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "⏭️  不在晚间检查窗口 (19-23h), 跳过"
+            echo "trigger_evening=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 🚑 触发早间补推
+        if: steps.check.outputs.trigger_morning == 'true'
+        run: |
+          curl -sS -X POST \
+            -H "Authorization: token ${{ secrets.PAT_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/299748876/dispatches" \
+            -d '{"ref":"main"}' \
+            -w "\n补推早间 HTTP %{http_code}\n"
+
+      - name: 🚑 触发晚间补推
+        if: steps.check.outputs.trigger_evening == 'true'
+        run: |
+          curl -sS -X POST \
+            -H "Authorization: token ${{ secrets.PAT_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/299748886/dispatches" \
+            -d '{"ref":"main"}' \
+            -w "\n补推晚间 HTTP %{http_code}\n"

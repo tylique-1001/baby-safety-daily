@@ -267,6 +267,25 @@ def main():
     args = parser.parse_args()
 
     today = datetime.date.today()
+    is_evening = args.mode == "evening"
+
+    # 🛡️ 幂等保护：如果今天报告已存在且生成不到60分钟，跳过（防止重复推送）
+    date_str = today.strftime("%Y-%m-%d")
+    filename = date_str + "-婴儿安全日报"
+    if is_evening:
+        filename += "-晚间更新"
+    filename += ".html"
+    docs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "docs")
+    target_file = os.path.join(docs_dir, filename)
+    if os.path.exists(target_file):
+        mtime = os.path.getmtime(target_file)
+        age_minutes = (datetime.datetime.now().timestamp() - mtime) / 60
+        if age_minutes < 60:
+            print("⏭️  报告已存在（" + str(int(age_minutes)) + "分钟前生成），跳过重复推送", flush=True)
+            return 0
+        else:
+            print("⏳ 报告已存在但过期（" + str(int(age_minutes)) + "分钟前），重新生成", flush=True)
+
     print("🚀 开始执行云端推送 (mode=" + args.mode + ", date=" + str(today) + ")", flush=True)
 
     is_evening = args.mode == "evening"
