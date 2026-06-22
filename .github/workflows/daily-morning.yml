@@ -4,11 +4,6 @@ on:
   schedule:
     - cron: '30 1 * * *'
   workflow_dispatch:
-    inputs:
-      mode:
-        description: '推送模式'
-        required: false
-        default: 'morning'
 
 permissions:
   contents: write
