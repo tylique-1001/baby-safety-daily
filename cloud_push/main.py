@@ -46,18 +46,6 @@ def get_tips(date):
     return [tips_pool[i] for i in sorted(indices)]
 
 
-# 品类 → Emoji 映射（14大类，覆盖用户全部要求: 喂养器具/洗护用品/服饰寝具/服装及布类/
-# 婴幼儿食品/食具类/启智玩具/家具类/电子电器/纸尿裤/出行安全/家居及外出必备/宝宝药箱/日常用品）
-CAT_EMOJI = {
-    "喂养器具": "🍼", "洗护用品": "🧴", "服饰寝具": "👕",
-    "服装及布类": "🧵", "婴幼儿食品": "🥣", "食具类": "🍽️",
-    "启智玩具": "🧩", "家具类": "🛏️", "电子电器": "⚡",
-    "纸尿裤": "👶", "出行安全": "🚗", "家居及外出必备": "🏠",
-    "宝宝药箱": "💊", "日常用品": "📦",
-}
-ALL_CATEGORIES = list(CAT_EMOJI.keys())
-
-
 def is_valid_url(url):
     """验证 URL 非首页（路径深度 ≥ 2）"""
     if not url:
@@ -71,83 +59,70 @@ def is_valid_url(url):
     return len(path_segments) >= 2
 
 
-def build_news_card(news, idx, severity_class, severity_icon):
-    """构建单条新闻卡片 HTML"""
-    title = news.get("title", "")
-    date_str = news.get("date", "")
-    source = news.get("source", "")
-    desc = news.get("desc", title)
-    categories = news.get("categories", ["日常用品"])
+def build_news_cards_html(news_list):
+    """构建新闻卡片 HTML（V5 风格：统一珊瑚左边框）"""
+    cards_html = ""
+    for idx, news in enumerate(news_list):
+        is_urgent = news.get("severity") == "urgent"
+        severity_class = "danger" if is_urgent else "prevent"
+        severity_icon = "🔴" if is_urgent else "🟡"
+        title = news.get("title", "")
+        date_str = news.get("date", "")
+        source = news.get("source", "")
+        desc = news.get("desc", title)
+        categories = news.get("categories", ["日常用品"])
 
-    # 品类芯片
-    cat_html = ""
-    for cat in categories:
-        cat_html += '<span class="cat-chip">' + cat + '</span>'
+        # 品类芯片
+        cat_html = ""
+        for cat in categories:
+            cat_html += '<span class="cat-chip">' + cat + '</span>'
 
-    # 来源链接
-    urls = news.get("urls", [])
-    single_url = news.get("url", "")
-    existing_urls = set(link for _, link in urls)
-    if single_url and is_valid_url(single_url) and single_url not in existing_urls:
-        urls.append((source, single_url))
-    if not urls:
-        urls = [(source, single_url if single_url else "#")]
+        # 来源链接
+        urls = news.get("urls", [])
+        single_url = news.get("url", "")
+        existing_urls = set(link for _, link in urls)
+        if single_url and is_valid_url(single_url) and single_url not in existing_urls:
+            urls.append((source, single_url))
+        if not urls:
+            urls = [(source, single_url if single_url else "#")]
 
-    url_count = len(urls)
-    max_visible = 3
-    source_links_html = ""
-    for j, (label, link) in enumerate(urls):
-        extra_class = " source-extra" if j >= max_visible else ""
-        source_links_html += (
-            '      <a href="' + link + '" target="_blank" rel="noopener" class="source-tag' + extra_class + '">'
-            '📖 ' + label + '</a>\n'
+        url_count = len(urls)
+        max_visible = 3
+        source_links_html = ""
+        for j, (label, link) in enumerate(urls):
+            extra_class = " source-extra" if j >= max_visible else ""
+            source_links_html += (
+                '      <a href="' + link + '" target="_blank" rel="noopener" class="source-tag' + extra_class + '">'
+                '📖 ' + label + '</a>\n'
+            )
+        if url_count > max_visible:
+            source_links_html += (
+                '      <button class="source-more-btn has-more" onclick="toggleMoreSources(event,' + str(idx) + ')">'
+                '📋 +' + str(url_count - max_visible) + ' 更多来源 ▼</button>\n'
+            )
+
+        card = (
+            '<div class="news-card" data-index="' + str(idx) + '">\n'
+            '  <div class="card-header" onclick="toggleCard(' + str(idx) + ')">\n'
+            '    <span class="severity-' + severity_class + '">' + severity_icon + ' ' + title + '</span>\n'
+            '    <span class="card-arrow">▼</span>\n'
+            '  </div>\n'
+            '  <div class="card-body">\n'
+            '    <div class="card-meta">📅 ' + date_str + ' | 来源：' + source + '</div>\n'
+            '    <div class="cat-row">' + cat_html + '</div>\n'
+            '    <p class="card-desc">' + desc + '</p>\n'
+            '    <div class="source-row" id="src-row-' + str(idx) + '">\n'
+            + source_links_html +
+            '    </div>\n'
+            '  </div>\n'
+            '</div>\n'
         )
-    if url_count > max_visible:
-        source_links_html += (
-            '      <button class="source-more-btn has-more" onclick="toggleMoreSources(event,' + str(idx) + ')">'
-            '📋 +' + str(url_count - max_visible) + ' 更多来源 ▼</button>\n'
-        )
-
-    cat_classes = " ".join(categories)
-    return (
-        '<div class="news-card" data-index="' + str(idx) + '" data-severity="' + severity_class + '" data-categories="' + cat_classes + '">\n'
-        '  <div class="card-header" onclick="toggleCard(' + str(idx) + ')">\n'
-        '    <span class="severity-' + severity_class + '">' + severity_icon + ' ' + title + '</span>\n'
-        '    <span class="card-arrow">▼</span>\n'
-        '  </div>\n'
-        '  <div class="card-body">\n'
-        '    <div class="card-meta">📅 ' + date_str + ' | 来源：' + source + '</div>\n'
-        '    <div class="cat-row">' + cat_html + '</div>\n'
-        '    <p class="card-desc">' + desc + '</p>\n'
-        '    <div class="source-row" id="src-row-' + str(idx) + '">\n'
-        + source_links_html +
-        '    </div>\n'
-        '  </div>\n'
-        '</div>\n'
-    )
-
-
-def build_section_html(news_list, section_id, section_title, severity_icon, severity_class, start_idx):
-    """构建一个分区的完整 HTML：标题 + 卡片列表"""
-    if not news_list:
-        return "", start_idx
-
-    html = (
-        '<h2 id="' + section_id + '" class="section-heading section-heading-' + severity_class + '">'
-        + severity_icon + ' ' + section_title
-        + ' <span class="section-count">' + str(len(news_list)) + '条</span></h2>\n'
-    )
-
-    for i, news in enumerate(news_list):
-        idx = start_idx + i
-        card_html = build_news_card(news, idx, severity_class, severity_icon)
-        html += card_html
-
-    return html, start_idx + len(news_list)
+        cards_html += card
+    return cards_html
 
 
 def generate_html_report(urgent_news, important_news, reminder_news, tips, report_date, mode):
-    """生成完整 HTML 报告（v5 分区版：紧急/重要/提醒/贴士 四区锚点跳转）"""
+    """生成完整 HTML 报告（V5 极简风格）"""
     date_str = report_date.strftime("%Y年%m月%d日")
     title = "婴儿安全资讯日报 · " + ("晚间更新" if mode == "evening" else "早间版")
 
@@ -155,39 +130,22 @@ def generate_html_report(urgent_news, important_news, reminder_news, tips, repor
     n_important = len(important_news)
     n_reminder = len(reminder_news)
 
-    # 四区内容
-    idx = 0
-    urgent_html, idx = build_section_html(urgent_news, "urgent-section", "紧急警示", "🔴", "danger", idx)
-    important_html, idx = build_section_html(important_news, "important-section", "重要召回/通报", "🟡", "prevent", idx)
-    reminder_html, idx = build_section_html(reminder_news, "reminder-section", "提醒关注", "🟠", "remind", idx)
+    # 合并所有新闻（V5 风格：平铺列表，无分区）
+    all_news = urgent_news + important_news + reminder_news
+    news_cards_html = build_news_cards_html(all_news)
 
     # 贴士
     tips_html = ""
     for tip in tips:
         tips_html += '<div class="tip-card">💡 ' + tip + '</div>\n'
 
-    # 覆盖品类统计
-    all_cats = set()
-    for news_list in [urgent_news, important_news, reminder_news]:
-        for n in news_list:
-            for c in n.get("categories", ["日常用品"]):
-                all_cats.add(c)
-    n_cats = len(all_cats)
-    cats_str = " · ".join(sorted(all_cats))
-
-    total_news = n_urgent + n_important + n_reminder
-
-    # 统计卡片 JS（四栏）
-    stats_js = (
+    # 统计
+    stats_html = (
         '<div class="stats">\n'
-        '  <div class="stat-card stat-urgent" onclick="jumpToSection(\'urgent-section\')">'
-        '<div class="num">' + str(n_urgent) + '</div><div class="label">🔴 紧急</div></div>\n'
-        '  <div class="stat-card stat-important" onclick="jumpToSection(\'important-section\')">'
-        '<div class="num">' + str(n_important) + '</div><div class="label">🟡 重要</div></div>\n'
-        '  <div class="stat-card stat-reminder" onclick="jumpToSection(\'reminder-section\')">'
-        '<div class="num">' + str(n_reminder) + '</div><div class="label">🟠 提醒</div></div>\n'
-        '  <div class="stat-card stat-tips" onclick="jumpToSection(\'tips-section\')">'
-        '<div class="num">' + str(len(tips)) + '</div><div class="label">💡 贴士</div></div>\n'
+        '  <div class="stat-card"><div class="num">' + str(n_urgent) + '</div><div class="label">🔴 紧急</div></div>\n'
+        '  <div class="stat-card"><div class="num">' + str(n_important) + '</div><div class="label">🟡 重要</div></div>\n'
+        '  <div class="stat-card"><div class="num">' + str(n_reminder) + '</div><div class="label">🟠 提醒</div></div>\n'
+        '  <div class="stat-card"><div class="num">' + str(len(tips)) + '</div><div class="label">💡 贴士</div></div>\n'
         '</div>\n'
     )
 
@@ -201,7 +159,7 @@ def generate_html_report(urgent_news, important_news, reminder_news, tips, repor
         '  <title>' + title + ' - ' + date_str + '</title>\n'
         '  <style>\n'
         '    :root {\n'
-        '      --coral: #FF5E62; --red: #DC2626; --amber: #D97706; --blue: #3B82F6; --orange: #EA580C;\n'
+        '      --coral: #FF5E62; --red: #DC2626; --amber: #D97706; --blue: #3B82F6;\n'
         '      --bg: #FAFAF9; --card: #FFFFFF;\n'
         '      --text: #0F172A; --text-2: #475569;\n'
         '      --sans: "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;\n'
@@ -211,71 +169,25 @@ def generate_html_report(urgent_news, important_news, reminder_news, tips, repor
         '    .hero { background: linear-gradient(135deg, var(--coral), var(--red)); color: white; padding: 30px; border-radius: 20px; margin-bottom: 20px; }\n'
         '    .hero h1 { font-size: 24px; margin-bottom: 8px; }\n'
         '    .hero p { opacity: 0.9; font-size: 14px; }\n'
-        '    /* ---- 四栏统计卡片 ---- */\n'
-        '    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 20px; }\n'
-        '    @media (max-width: 480px) { .stats { grid-template-columns: repeat(2, 1fr); } }\n'
-        '    .stat-card { background: var(--card); padding: 14px 8px; border-radius: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); text-align: center; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s; border: 2px solid transparent; user-select: none; -webkit-tap-highlight-color: transparent; }\n'
-        '    .stat-card:hover, .stat-card:active { transform: translateY(-2px); }\n'
-        '    .stat-card:active { transform: scale(0.96); transition: transform 0.08s; }\n'
-        '    .stat-card.tapped { transform: scale(0.96); box-shadow: 0 0 0 3px var(--coral); transition: transform 0.1s, box-shadow 0.1s; }\n'
-        '    .stat-card .num { font-size: 26px; font-weight: 800; }\n'
-        '    .stat-card .label { font-size: 11px; color: var(--text-2); margin-top: 2px; }\n'
-        '    .stat-urgent { border-color: #FECACA; } .stat-urgent .num { color: var(--red); }\n'
-        '    .stat-important { border-color: #FED7AA; } .stat-important .num { color: var(--amber); }\n'
-        '    .stat-reminder { border-color: #BFDBFE; } .stat-reminder .num { color: var(--blue); }\n'
-        '    .stat-tips { border-color: #BBF7D0; } .stat-tips .num { color: #16A34A; }\n'
-        '    /* ---- 分区标题 ---- */\n'
-        '    .section-heading { padding: 12px 16px; border-radius: 10px; margin: 24px 0 12px; font-size: 17px; scroll-margin-top: 24px; border-left: 5px solid transparent; }\n'
-        '    .section-heading-danger  { background: #FEF2F2; border-left-color: var(--red); }\n'
-        '    .section-heading-prevent { background: #FFFBEB; border-left-color: var(--amber); }\n'
-        '    .section-heading-remind  { background: #F0F9FF; border-left-color: var(--blue); }\n'
-        '    .section-heading-danger.arrived  { animation: sectionPulseDanger 3.0s ease-out forwards; }\n'
-        '    .section-heading-prevent.arrived { animation: sectionPulsePrevent 3.0s ease-out forwards; }\n'
-        '    .section-heading-remind.arrived  { animation: sectionPulseRemind 3.0s ease-out forwards; }\n'
-        '    @keyframes sectionPulseDanger {\n'
-        '      0%   { background: rgba(220,38,38,0.55) !important; border-left-color: var(--red); box-shadow: 0 0 28px rgba(220,38,38,0.28), inset 0 0 40px rgba(220,38,38,0.18); transform: scale(1.05); color: #B91C1C; font-weight: 700; }\n'
-        '      12%  { background: rgba(220,38,38,0.35) !important; border-left-color: var(--red); box-shadow: 0 0 14px rgba(220,38,38,0.14); transform: scale(1.02); color: #DC2626; font-weight: 600; }\n'
-        '      100% { background: #FEF2F2 !important; border-left-color: var(--red); box-shadow: none; transform: scale(1); color: inherit; font-weight: inherit; }\n'
-        '    }\n'
-        '    @keyframes sectionPulsePrevent {\n'
-        '      0%   { background: rgba(217,119,6,0.55) !important; border-left-color: var(--amber); box-shadow: 0 0 28px rgba(217,119,6,0.28), inset 0 0 40px rgba(217,119,6,0.18); transform: scale(1.05); color: #92400E; font-weight: 700; }\n'
-        '      12%  { background: rgba(217,119,6,0.35) !important; border-left-color: var(--amber); box-shadow: 0 0 14px rgba(217,119,6,0.14); transform: scale(1.02); color: #B45309; font-weight: 600; }\n'
-        '      100% { background: #FFFBEB !important; border-left-color: var(--amber); box-shadow: none; transform: scale(1); color: inherit; font-weight: inherit; }\n'
-        '    }\n'
-        '    @keyframes sectionPulseRemind {\n'
-        '      0%   { background: rgba(59,130,246,0.55) !important; border-left-color: var(--blue); box-shadow: 0 0 28px rgba(59,130,246,0.28), inset 0 0 40px rgba(59,130,246,0.18); transform: scale(1.05); color: #1E40AF; font-weight: 700; }\n'
-        '      12%  { background: rgba(59,130,246,0.35) !important; border-left-color: var(--blue); box-shadow: 0 0 14px rgba(59,130,246,0.14); transform: scale(1.02); color: #2563EB; font-weight: 600; }\n'
-        '      100% { background: #F0F9FF !important; border-left-color: var(--blue); box-shadow: none; transform: scale(1); color: inherit; font-weight: inherit; }\n'
-        '    }\n'
-        '    .section-count { font-size: 12px; color: var(--text-2); margin-left: 8px; font-weight: 400; }\n'
+        '    /* ---- 统计卡片 ---- */\n'
+        '    .stats { display: flex; gap: 12px; margin-bottom: 20px; }\n'
+        '    .stat-card { flex: 1; background: var(--card); padding: 16px; border-radius: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); text-align: center; }\n'
+        '    .stat-card .num { font-size: 28px; font-weight: 700; color: var(--coral); }\n'
+        '    .stat-card .label { font-size: 12px; color: var(--text-2); }\n'
         '    /* ---- 新闻卡片 ---- */\n'
-        '    .news-card { background: var(--card); border-radius: 14px; margin-bottom: 10px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.06); border-left: 5px solid var(--coral); }\n'
-        '    .news-card[data-severity="danger"]  { border-left-color: var(--red); }\n'
-        '    .news-card[data-severity="prevent"] { border-left-color: var(--amber); }\n'
-        '    .news-card[data-severity="remind"]  { border-left-color: var(--blue); }\n'
-        '    .card-header { padding: 14px 14px 14px 18px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }\n'
-        '    .news-card[data-severity="danger"] .card-header:hover  { background: #FEF2F2; }\n'
-        '    .news-card[data-severity="prevent"] .card-header:hover { background: #FFFBEB; }\n'
-        '    .news-card[data-severity="remind"] .card-header:hover  { background: #F0F9FF; }\n'
+        '    .news-card { background: var(--card); border-radius: 14px; margin-bottom: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.06); border-left: 4px solid var(--coral); }\n'
+        '    .card-header { padding: 14px 18px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }\n'
         '    .card-header:hover { background: #fef2f2; }\n'
         '    .card-body { padding: 0 18px 18px; display: none; }\n'
         '    .card-body.open { display: block; }\n'
         '    .severity-danger { color: var(--red); font-weight: 600; }\n'
         '    .severity-prevent { color: var(--amber); font-weight: 600; }\n'
-        '    .severity-remind { color: var(--blue); font-weight: 600; }\n'
-        '    .card-arrow { transition: transform 0.3s; font-size: 14px; }\n'
+        '    .card-arrow { transition: transform 0.3s; }\n'
         '    .card-meta { font-size: 13px; color: var(--text-2); margin-bottom: 6px; }\n'
         '    .card-desc { font-size: 14px; line-height: 1.7; margin-bottom: 10px; }\n'
         '    /* ---- 品类芯片 ---- */\n'
         '    .cat-row { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px; }\n'
-        '    /* ---- 品类筛选栏 ---- */\n'
-        '    .cat-bar { background: var(--card); padding: 12px 14px; border-radius: 12px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }\n'
-        '    .cat-bar-label { font-size: 12px; color: var(--text-2); margin-right: 4px; white-space: nowrap; }\n'
-        '    .filter-chip { display: inline-block; padding: 5px 10px; background: #F3F4F6; color: var(--text-2); border-radius: 16px; font-size: 12px; cursor: pointer; transition: all 0.2s; user-select: none; -webkit-tap-highlight-color: transparent; white-space: nowrap; }\n'
-        '    .filter-chip:hover { background: #E5E7EB; transform: translateY(-1px); }\n'
-        '    .filter-chip.active { background: var(--coral); color: #fff; font-weight: 600; }\n'
-        '    .filter-chip.inactive { opacity: 0.35; cursor: default; pointer-events: none; }\n'
-        '    .news-card.filtered-out { display: none !important; }\n'
+        '    .cat-chip { display: inline-block; padding: 3px 8px; background: #F3F4F6; color: var(--text-2); border-radius: 4px; font-size: 12px; }\n'
         '    /* ---- 来源链接 ---- */\n'
         '    .source-row { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }\n'
         '    .source-tag { display: inline-block; padding: 4px 10px; background: #FFF3F2; color: var(--coral); border-radius: 6px; text-decoration: none; font-size: 13px; }\n'
@@ -284,16 +196,13 @@ def generate_html_report(urgent_news, important_news, reminder_news, tips, repor
         '    .source-row.expanded .source-extra { display: inline-block; }\n'
         '    .source-more-btn { padding: 4px 10px; background: #f1f5f9; color: var(--text-2); border: 1px solid #e2e8f0; border-radius: 6px; font-size: 13px; cursor: pointer; font-family: var(--sans); }\n'
         '    .source-more-btn:hover { background: #e2e8f0; }\n'
-        '    /* 🔖 has-more 源截断标识 */\n'
-        '    .tip-card { background: #F0FDF4; border-left: 4px solid #16A34A; padding: 12px 16px; border-radius: 14px; margin-bottom: 8px; font-size: 14px; }\n'
-        '    .back-to-top { position: fixed; bottom: 24px; right: 24px; width: 44px; height: 44px; background: var(--coral); color: white; border: none; border-radius: 50%; font-size: 20px; cursor: pointer; box-shadow: 0 4px 12px rgba(255,94,98,0.35); display: none; z-index: 100; }\n'
-        '    .back-to-top.show { display: block; }\n'
-        '    .back-to-top:hover { opacity: 0.85; }\n'
+        '    .has-more { font-weight: 500; }\n'
+        '    /* ---- 贴士 ---- */\n'
+        '    .tip-card { background: #EFF6FF; border-left: 4px solid var(--blue); padding: 12px 16px; border-radius: 14px; margin-bottom: 8px; font-size: 14px; }\n'
         '    html.scroll-restoring{visibility:hidden}\n'
         '    @media print {\n'
         '      body { background: white; max-width: 100%; padding: 0; }\n'
         '      .hero { background: none; color: var(--text); border: 2px solid var(--coral); }\n'
-        '      .back-to-top { display: none !important; }\n'
         '      .stats { display: none; }\n'
         '      .news-card { break-inside: avoid; box-shadow: none; border: 1px solid #e2e8f0; }\n'
         '      .card-body { display: block !important; }\n'
@@ -308,68 +217,24 @@ def generate_html_report(urgent_news, important_news, reminder_news, tips, repor
         '    if(v){try{var s=JSON.parse(v);if(s.y>10||s.ci!==undefined){document.documentElement.className="scroll-restoring";window.__ds=s;}}catch(e){}}\n'
         '  })();\n'
         '  </script>\n'
+        '  <style>html.scroll-restoring{visibility:hidden}</style>\n'
         '</head>\n'
         '<body>\n'
-        '  <button class="back-to-top" id="backToTop" onclick="window.scrollTo({top:0,behavior:\'smooth\'})" title="返回顶部">↑</button>\n'
         '  <div class="hero">\n'
         '    <h1>🛡️ ' + title + '</h1>\n'
         '    <p>' + date_str + ' | 重点关注 1-2 岁婴幼儿安全动态</p>\n'
-        '    <p style="margin-top:8px;font-size:13px;">📊 ' + str(total_news) + '条资讯 · ' + str(n_cats) + '个品类 · 阅读约' + str(total_news + 2) + '分钟</p>\n'
         '  </div>\n'
-        + stats_js +
-        # 品类概览条 — 可点击筛选芯片
-        '  <div class="cat-bar" id="catBar"><span class="cat-bar-label">📂 品类筛选</span>'
-        '<span class="filter-chip active" onclick="filterByCategory(\'全部\')" data-cat="全部">全部</span>' +
-        ''.join(
-            '<span class="filter-chip'
-            + (' inactive' if c not in all_cats else '')
-            + '" onclick="filterByCategory(\'' + c + '\')" data-cat="' + c + '">'
-            + CAT_EMOJI.get(c, '📌') + ' ' + c + '</span>'
-            for c in ALL_CATEGORIES
-        ) +
-        '</div>\n'
-        + urgent_html
-        + important_html
-        + reminder_html
-        + '  <h2 id="tips-section" class="section-heading" style="background:#F0FDF4;border-left:5px solid #16A34A;">💡 安全贴士 <span class="section-count">' + str(len(tips)) + '条</span></h2>\n'
-        + tips_html
-        + '  <hr style="margin:30px 0 20px;border:none;border-top:1px solid #e2e8f0;">\n'
-        + '  <p style="text-align:center;color:var(--text-2);font-size:13px;">\n'
-        + '    📊 数据来源：市场监管总局 · 中国质量新闻网 · 央视新闻 · 财新<br>\n'
-        + '    ⚠️ 本日报仅供参考，具体操作请遵循官方指导。\n'
-        + '  </p>\n'
+        + stats_html +
+        '  <h2 style="margin:20px 0 12px;font-size:18px;">📰 安全资讯</h2>\n'
+        + news_cards_html +
+        '  <h2 style="margin:20px 0 12px;font-size:18px;">💡 安全贴士</h2>\n'
+        + tips_html +
+        '  <hr style="margin:30px 0 20px;border:none;border-top:1px solid #e2e8f0;">\n'
+        '  <p style="text-align:center;color:var(--text-2);font-size:13px;">\n'
+        '    📊 数据来源：市场监管总局 · 中国质量新闻网 · 央视新闻 · 财新<br>\n'
+        '    ⚠️ 本日报仅供参考，具体操作请遵循官方指导。\n'
+        '  </p>\n'
         '  <script>\n'
-        '  /* ── 锚点跳转（统计卡片点击 → 丝滑滚动 + 柔和背景淡入）── */\n'
-        '  function jumpToSection(id) {\n'
-        '    var el = document.getElementById(id);\n'
-        '    if (!el) return;\n'
-        '    // 清除所有旧标记\n'
-        '    document.querySelectorAll(\'.arrived\').forEach(function(h) { h.classList.remove(\'arrived\'); });\n'
-        '    // 丝滑滚动\n'
-        '    el.scrollIntoView({ behavior: "smooth", block: "start", inline: "nearest" });\n'
-        '    // 滚动到达后加柔和背景色，1.8s 自然消退\n'
-        '    setTimeout(function() {\n'
-        '      var e = document.getElementById(id);\n'
-        '      if (e) e.classList.add(\'arrived\');\n'
-        '    }, 400);\n'
-        '  }\n'
-        '  /* ── 品类筛选 ── */\n'
-        '  function filterByCategory(cat) {\n'
-        '    var chips = document.querySelectorAll(\'.filter-chip\');\n'
-        '    var cards = document.querySelectorAll(\'.news-card\');\n'
-        '    // 更新芯片状态\n'
-        '    chips.forEach(function(c) { c.classList.remove(\'active\'); if(c.getAttribute(\'data-cat\')===cat) c.classList.add(\'active\'); });\n'
-        '    // 筛选卡片\n'
-        '    if(cat === \'全部\') {\n'
-        '      cards.forEach(function(c) { c.classList.remove(\'filtered-out\'); });\n'
-        '    } else {\n'
-        '      cards.forEach(function(c) {\n'
-        '        var cats = (c.getAttribute(\'data-categories\')||\'\').split(\' \');\n'
-        '        if(cats.indexOf(cat) === -1) { c.classList.add(\'filtered-out\'); }\n'
-        '        else { c.classList.remove(\'filtered-out\'); }\n'
-        '      });\n'
-        '    }\n'
-        '  }\n'
         '  /* ── 卡片折叠/展开 ── */\n'
         '  function toggleCard(idx) {\n'
         '    var card = document.querySelector(\'.news-card[data-index="\'+idx+\'"]\');\n'
@@ -395,15 +260,7 @@ def generate_html_report(urgent_news, important_news, reminder_news, tips, repor
         '      }\n'
         '    }\n'
         '  }\n'
-        '  /* ── Back-to-Top ── */\n'
-        '  (function(){\n'
-        '    var btn = document.getElementById(\'backToTop\');\n'
-        '    window.addEventListener(\'scroll\', function(){\n'
-        '      if(window.scrollY > 400) { btn.classList.add(\'show\'); }\n'
-        '      else { btn.classList.remove(\'show\'); }\n'
-        '    }, {passive:true});\n'
-        '  })();\n'
-        '  /* 🔙 滚动位置保存/恢复 v4 */\n'
+        '  /* 🔙 滚动位置保存/恢复 v5 */\n'
         '  (function(){\n'
         '    var STORAGE_KEY = \'_daily_rpt_state\';\n'
         '    function getCardAnchor() {\n'
@@ -427,10 +284,6 @@ def generate_html_report(urgent_news, important_news, reminder_news, tips, repor
         '      var link = e.target.closest(\'a[href^="http"]\');\n'
         '      if(link) saveState();\n'
         '    }, true);\n'
-        '    window.addEventListener(\'touchstart\', function(e) {\n'
-        '      var link = e.target.closest(\'a[href^="http"]\');\n'
-        '      if(link) saveState();\n'
-        '    }, {passive:true});\n'
         '    window.addEventListener(\'pagehide\', saveState);\n'
         '    var scrollTimer = 0;\n'
         '    window.addEventListener(\'scroll\', function() {\n'
