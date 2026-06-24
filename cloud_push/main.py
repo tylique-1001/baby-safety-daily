@@ -122,7 +122,7 @@ def build_news_cards_html(news_list):
 
 
 def generate_html_report(urgent_news, important_news, reminder_news, tips, report_date, mode):
-    """生成完整 HTML 报告（V5 极简风格）"""
+    """生成完整 HTML 报告（V5 极简风格 — 无进度条/导航/分区/底栏）"""
     date_str = report_date.strftime("%Y年%m月%d日")
     title = "婴儿安全资讯日报 · " + ("晚间更新" if mode == "evening" else "早间版")
 
@@ -130,21 +130,9 @@ def generate_html_report(urgent_news, important_news, reminder_news, tips, repor
     n_important = len(important_news)
     n_reminder = len(reminder_news)
 
-    # 合并所有新闻（V5 风格：分区展示，带锚点）
+    # 合并所有新闻（V5 风格：平铺列表，无分区）
     all_news = urgent_news + important_news + reminder_news
     news_cards_html = build_news_cards_html(all_news)
-
-    # 找出各分区的起止索引，用于插入分区标题
-    urgent_end = len(urgent_news)
-    important_end = urgent_end + len(important_news)
-
-    # 重建带分区标题的新闻区域
-    all_cards = build_news_cards_html(all_news).split('\n')
-    # build_news_cards_html returns a big string, we need to split at each card's closing </div>
-    # Better approach: build each section's cards separately and join with headings
-    urgent_cards_html = build_news_cards_html(urgent_news)
-    important_cards_html = build_news_cards_html(important_news)
-    reminder_cards_html = build_news_cards_html(reminder_news)
 
     # 贴士
     tips_html = ""
@@ -177,24 +165,7 @@ def generate_html_report(urgent_news, important_news, reminder_news, tips, repor
         '      --sans: "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;\n'
         '    }\n'
         '    * { box-sizing: border-box; margin: 0; padding: 0; }\n'
-        '    body { font-family: var(--sans); background: var(--bg); color: var(--text); padding: 20px 20px 80px; max-width: 680px; margin: 0 auto; }\n'
-        '    /* ── 阅读进度条（顶部） ── */\n'
-        '    .reading-progress { position: fixed; top: 0; left: 0; height: 3px; background: var(--coral); z-index: 1001; width: 0%; transition: width 0.15s linear; border-radius: 0 2px 2px 0; }\n'
-        '    /* ── 快捷导航（右上角悬浮按钮） ── */\n'
-        '    .sticky-nav { position: fixed; top: 12px; right: 16px; z-index: 1000; display: flex; gap: 5px; flex-wrap: wrap; justify-content: flex-end; }\n'
-        '    .nav-btn { padding: 5px 10px; border-radius: 16px; border: 1px solid #e2e8f0; background: rgba(255,255,255,0.92); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); font-size: 12px; color: var(--text-2); cursor: pointer; font-family: var(--sans); white-space: nowrap; transition: all 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }\n'
-        '    .nav-btn:hover { background: var(--card); border-color: var(--coral); color: var(--coral); }\n'
-        '    .nav-btn.active { background: var(--coral); color: #fff; border-color: var(--coral); font-weight: 600; box-shadow: 0 2px 8px rgba(255,94,98,0.25); }\n'
-        '    /* ── 分区标题（锚点） ── */\n'
-        '    .section-head { margin: 28px 0 14px; font-size: 17px; font-weight: 600; scroll-margin-top: 60px; padding: 10px 14px; border-radius: 10px; }\n'
-        '    .section-head-urgent    { background: #FEF2F2; color: var(--red); border-left: 4px solid var(--red); }\n'
-        '    .section-head-important { background: #FFFBEB; color: var(--amber); border-left: 4px solid var(--amber); }\n'
-        '    .section-head-reminder { background: #F0F9FF; color: var(--blue); border-left: 4px solid var(--blue); }\n'
-        '    .section-head-tips     { background: #EFF6FF; color: var(--blue); border-left: 4px solid var(--blue); }\n'
-        '    /* ── 底部阅读进度 ── */\n'
-        '    .reading-foot { position: fixed; bottom: 0; left: 0; right: 0; background: rgba(255,255,255,0.95); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-top: 1px solid #e2e8f0; padding: 8px 20px; z-index: 999; display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text-2); }\n'
-        '    .reading-foot-bar { flex: 1; height: 4px; background: #e2e8f0; border-radius: 2px; overflow: hidden; }\n'
-        '    .reading-foot-fill { height: 100%; background: var(--coral); border-radius: 2px; width: 0%; transition: width 0.2s linear; }\n'
+        '    body { font-family: var(--sans); background: var(--bg); color: var(--text); padding: 20px; max-width: 680px; margin: 0 auto; }\n'
         '    .hero { background: linear-gradient(135deg, var(--coral), var(--red)); color: white; padding: 30px; border-radius: 20px; margin-bottom: 20px; }\n'
         '    .hero h1 { font-size: 24px; margin-bottom: 8px; }\n'
         '    .hero p { opacity: 0.9; font-size: 14px; }\n'
@@ -204,8 +175,8 @@ def generate_html_report(urgent_news, important_news, reminder_news, tips, repor
         '    .stat-card .num { font-size: 28px; font-weight: 700; color: var(--coral); }\n'
         '    .stat-card .label { font-size: 12px; color: var(--text-2); }\n'
         '    /* ---- 新闻卡片 ---- */\n'
-        '    .news-card { background: var(--card); border-radius: 14px; margin-bottom: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }\n'
-        '    .card-header { padding: 14px 18px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; border-left: 4px solid var(--coral); }\n'
+        '    .news-card { background: var(--card); border-radius: 14px; margin-bottom: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.06); border-left: 4px solid var(--coral); }\n'
+        '    .card-header { padding: 14px 18px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }\n'
         '    .card-header:hover { background: #fef2f2; }\n'
         '    .card-body { padding: 0 18px 18px; display: none; }\n'
         '    .card-body.open { display: block; }\n'
@@ -249,67 +220,21 @@ def generate_html_report(urgent_news, important_news, reminder_news, tips, repor
         '  <style>html.scroll-restoring{visibility:hidden}</style>\n'
         '</head>\n'
         '<body>\n'
-        '  <div class="reading-progress" id="readingBar"></div>\n'
-        '  <nav class="sticky-nav">\n'
-        '    <button class="nav-btn" onclick="scrollToSection(\'overview\')">📋 概览</button>\n'
-        '    <button class="nav-btn" onclick="scrollToSection(\'urgent\')">🔴 紧急</button>\n'
-        '    <button class="nav-btn" onclick="scrollToSection(\'important\')">🟡 重要</button>\n'
-        '    <button class="nav-btn" onclick="scrollToSection(\'reminder\')">🟠 提醒</button>\n'
-        '    <button class="nav-btn" onclick="scrollToSection(\'tips\')">💡 贴士</button>\n'
-        '  </nav>\n'
-        '  <div class="hero" id="section-overview">\n'
+        '  <div class="hero">\n'
         '    <h1>🛡️ ' + title + '</h1>\n'
         '    <p>' + date_str + ' | 重点关注 1-2 岁婴幼儿安全动态</p>\n'
-        '    <p style="margin-top:8px;font-size:13px;">⏱️ 阅读时长约 ' + str(n_urgent + n_important + n_reminder + 2) + ' 分钟</p>\n'
         '  </div>\n'
         + stats_html +
-        '  <h2 class="section-head section-head-urgent" id="section-urgent">🔴 紧急警示（' + str(n_urgent) + '条）</h2>\n'
-        + (urgent_cards_html or '<p style="color:var(--text-2);font-size:14px;padding:8px 0;">暂无紧急警示</p>\n') +
-        '  <h2 class="section-head section-head-important" id="section-important">🟡 重要关注（' + str(n_important) + '条）</h2>\n'
-        + (important_cards_html or '<p style="color:var(--text-2);font-size:14px;padding:8px 0;">暂无重要关注</p>\n') +
-        '  <h2 class="section-head section-head-reminder" id="section-reminder">🟠 提醒关注（' + str(n_reminder) + '条）</h2>\n'
-        + (reminder_cards_html or '<p style="color:var(--text-2);font-size:14px;padding:8px 0;">暂无提醒</p>\n') +
-        '  <h2 class="section-head section-head-tips" id="section-tips">💡 安全贴士</h2>\n'
+        '  <h2 style="margin:20px 0 12px;font-size:18px;">📰 安全资讯</h2>\n'
+        + news_cards_html +
+        '  <h2 style="margin:20px 0 12px;font-size:18px;">💡 安全贴士</h2>\n'
         + tips_html +
         '  <hr style="margin:30px 0 20px;border:none;border-top:1px solid #e2e8f0;">\n'
         '  <p style="text-align:center;color:var(--text-2);font-size:13px;">\n'
-        '    📊 数据来源：市场监管总局 · 中国质量新闻网 · 央视新闻<br>\n'
+        '    📊 数据来源：市场监管总局 · 中国质量新闻网 · 央视新闻 · 财新<br>\n'
         '    ⚠️ 本日报仅供参考，具体操作请遵循官方指导。\n'
         '  </p>\n'
-        '  <div class="reading-foot">\n'
-        '    <span>📖 已阅读</span>\n'
-        '    <div class="reading-foot-bar"><div class="reading-foot-fill" id="readingFootFill"></div></div>\n'
-        '    <span id="readingPct">0%</span>\n'
-        '  </div>\n'
         '  <script>\n'
-        '  /* ── V5 进度条 + 导航 + 读数 ── */\n'
-        '  var sections=["overview","urgent","important","reminder","tips"];\n'
-        '  function updateReading(){\n'
-        '    var h=document.documentElement.scrollHeight-window.innerHeight;\n'
-        '    var y=window.scrollY||window.pageYOffset;\n'
-        '    var pct=h>0?Math.min(100,Math.round(y/h*100)):0;\n'
-        '    document.getElementById("readingBar").style.width=pct+"%";\n'
-        '    document.getElementById("readingFootFill").style.width=pct+"%";\n'
-        '    document.getElementById("readingPct").textContent=pct+"%";\n'
-        '    /* nav active */\n'
-        '    var active=null;\n'
-        '    for(var i=sections.length-1;i>=0;i--){\n'
-        '      var el=document.getElementById("section-"+sections[i]);\n'
-        '      if(el&&el.getBoundingClientRect().top<=window.innerHeight*0.5){active=sections[i];break;}\n'
-        '    }\n'
-        '    if(!active) active="overview";\n'
-        '    document.querySelectorAll(".nav-btn").forEach(function(b){\n'
-        '      b.classList.toggle("active",b.textContent.indexOf({\n'
-        '        overview:"概览",urgent:"紧急",important:"重要",reminder:"提醒",tips:"贴士"\n'
-        '      }[active])>-1);\n'
-        '    });\n'
-        '  }\n'
-        '  function scrollToSection(id){\n'
-        '    var el=document.getElementById("section-"+id);\n'
-        '    if(el) el.scrollIntoView({behavior:"smooth",block:"start"});\n'
-        '  }\n'
-        '  window.addEventListener("scroll",updateReading,{passive:true});\n'
-        '  window.addEventListener("load",updateReading);\n'
         '  /* ── 卡片折叠/展开 ── */\n'
         '  function toggleCard(idx) {\n'
         '    var card = document.querySelector(\'.news-card[data-index="\'+idx+\'"]\');\n'
