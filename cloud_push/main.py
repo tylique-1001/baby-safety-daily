@@ -132,12 +132,11 @@ def build_section_html(news_list, section_id, section_title, severity_icon, seve
     if not news_list:
         return "", start_idx
 
-    header_bg = {"urgent": "#FEF2F2", "important": "#FFFBEB", "reminder": "#F0F9FF"}
-    header_border = {"urgent": "var(--red)", "important": "var(--amber)", "reminder": "var(--blue)"}
+    header_border = {"danger": "var(--red)", "prevent": "var(--amber)", "remind": "var(--blue)"}
 
     html = (
-        '<h2 id="' + section_id + '" class="section-heading" style="background:' + header_bg.get(severity_class, "#f1f5f9")
-        + ';border-left:5px solid ' + header_border.get(severity_class, "var(--blue)") + ';">'
+        '<h2 id="' + section_id + '" class="section-heading section-heading-' + severity_class + '"'
+        + ' style="border-left:5px solid ' + header_border.get(severity_class, "var(--blue)") + ';">'
         + severity_icon + ' ' + section_title
         + ' <span class="section-count">' + str(len(news_list)) + '条</span></h2>\n'
     )
@@ -230,16 +229,25 @@ def generate_html_report(urgent_news, important_news, reminder_news, tips, repor
         '    .stat-tips { border-color: #BBF7D0; } .stat-tips .num { color: #16A34A; }\n'
         '    /* ---- 分区标题 ---- */\n'
         '    .section-heading { padding: 12px 16px; border-radius: 10px; margin: 24px 0 12px; font-size: 17px; scroll-margin-top: 24px; border-left: 3px solid transparent; }\n'
+        '    .section-heading-danger  { background: #FEF2F2; }\n'
+        '    .section-heading-prevent { background: #FFFBEB; }\n'
+        '    .section-heading-remind  { background: #F0F9FF; }\n'
         '    .section-heading.arrived { animation: sectionPulse 2.8s ease-out forwards; }\n'
         '    @keyframes sectionPulse {\n'
-        '      0%   { background: rgba(255,94,98,0.38); border-left-color: var(--coral); border-left-width: 4px; box-shadow: 0 0 20px rgba(255,94,98,0.18), inset 0 0 30px rgba(255,94,98,0.12); transform: scale(1.03); color: #DC2626; font-weight: 600; }\n'
-        '      20%  { background: rgba(255,94,98,0.22); border-left-color: var(--coral); border-left-width: 3px; box-shadow: 0 0 8px rgba(255,94,98,0.08); transform: scale(1.01); color: #DC2626; font-weight: 600; }\n'
-        '      100% { background: transparent; border-left-color: transparent; border-left-width: 3px; box-shadow: none; transform: scale(1); color: inherit; font-weight: inherit; }\n'
+        '      0%   { background: rgba(255,94,98,0.45) !important; border-left-color: var(--coral); border-left-width: 5px; box-shadow: 0 0 24px rgba(255,94,98,0.25), inset 0 0 36px rgba(255,94,98,0.15); transform: scale(1.04); color: #B91C1C; font-weight: 700; }\n'
+        '      15%  { background: rgba(255,94,98,0.30) !important; border-left-color: var(--coral); border-left-width: 4px; box-shadow: 0 0 12px rgba(255,94,98,0.12); transform: scale(1.02); color: #DC2626; font-weight: 600; }\n'
+        '      100% { background: transparent !important; border-left-color: transparent; border-left-width: 3px; box-shadow: none; transform: scale(1); color: inherit; font-weight: inherit; }\n'
         '    }\n'
         '    .section-count { font-size: 12px; color: var(--text-2); margin-left: 8px; font-weight: 400; }\n'
         '    /* ---- 新闻卡片 ---- */\n'
         '    .news-card { background: var(--card); border-radius: 14px; margin-bottom: 10px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }\n'
         '    .card-header { padding: 14px 18px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; border-left: 4px solid var(--coral); }\n'
+        '    .news-card[data-severity="danger"] .card-header  { border-left-color: var(--red); }\n'
+        '    .news-card[data-severity="prevent"] .card-header { border-left-color: var(--amber); }\n'
+        '    .news-card[data-severity="remind"] .card-header  { border-left-color: var(--blue); }\n'
+        '    .news-card[data-severity="danger"] .card-header:hover  { background: #FEF2F2; }\n'
+        '    .news-card[data-severity="prevent"] .card-header:hover { background: #FFFBEB; }\n'
+        '    .news-card[data-severity="remind"] .card-header:hover  { background: #F0F9FF; }\n'
         '    .card-header:hover { background: #fef2f2; }\n'
         '    .card-body { padding: 0 18px 18px; display: none; }\n'
         '    .card-body.open { display: block; }\n'
