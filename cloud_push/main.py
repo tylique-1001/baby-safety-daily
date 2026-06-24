@@ -175,8 +175,8 @@ def generate_html_report(urgent_news, important_news, reminder_news, tips, repor
         '    .stat-card .num { font-size: 28px; font-weight: 700; color: var(--coral); }\n'
         '    .stat-card .label { font-size: 12px; color: var(--text-2); }\n'
         '    /* ---- 新闻卡片 ---- */\n'
-        '    .news-card { background: var(--card); border-radius: 14px; margin-bottom: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.06); border-left: 4px solid var(--coral); }\n'
-        '    .card-header { padding: 14px 18px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }\n'
+        '    .news-card { background: var(--card); border-radius: 14px; margin-bottom: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }\n'
+        '    .card-header { padding: 14px 18px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; border-left: 4px solid var(--coral); }\n'
         '    .card-header:hover { background: #fef2f2; }\n'
         '    .card-body { padding: 0 18px 18px; display: none; }\n'
         '    .card-body.open { display: block; }\n'
@@ -223,6 +223,7 @@ def generate_html_report(urgent_news, important_news, reminder_news, tips, repor
         '  <div class="hero">\n'
         '    <h1>🛡️ ' + title + '</h1>\n'
         '    <p>' + date_str + ' | 重点关注 1-2 岁婴幼儿安全动态</p>\n'
+        '    <p style="margin-top:8px;font-size:13px;">⏱️ 阅读时长约 ' + str(n_urgent + n_important + n_reminder + len(tips) + 1) + ' 分钟</p>\n'
         '  </div>\n'
         + stats_html +
         '  <h2 style="margin:20px 0 12px;font-size:18px;">📰 安全资讯</h2>\n'
