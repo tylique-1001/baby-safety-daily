@@ -4,7 +4,12 @@ on:
   schedule:
     # 北京时间 18:30 = UTC 10:30
     - cron: '30 10 * * *'
-  workflow_dispatch:  # 支持手动触发
+  workflow_dispatch:
+    inputs:
+      force:
+        description: '强制重新推送（跳过幂等保护）'
+        type: boolean
+        default: false
   push:
     paths:
       - 'cloud_push/**'
@@ -12,11 +17,12 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   push-evening:
     runs-on: ubuntu-latest
-    timeout-minutes: 15  # 15分钟硬超时
+    timeout-minutes: 35  # 自愈循环最多23分钟 + 余量
     steps:
       - name: 📥 Checkout 仓库
         uses: actions/checkout@v4
@@ -29,10 +35,34 @@ jobs:
           python-version: '3.12'
 
       - name: 📦 安装依赖
-        run: |
-          pip install -r cloud_push/requirements.txt
+        run: pip install -r cloud_push/requirements.txt
 
-      - name: 📰 采集晚间增量新闻 & 生成报告
+      # 🔀 跨 workflow 救援：如果早间报告缺失，先补推早间
+      - name: 🔀 检查早间报告（跨workflow救援）
+        id: check_morning
+        run: |
+          TODAY=$(TZ=Asia/Shanghai date +%Y-%m-%d)
+          MORNING_FILE="docs/${TODAY}-婴儿安全日报.html"
+          if [ ! -f "$MORNING_FILE" ]; then
+            echo "⚠️ 早间报告缺失，触发早间补推..."
+            echo "missing_morning=true" >> $GITHUB_OUTPUT
+          else
+            echo "✅ 早间报告已存在"
+            echo "missing_morning=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 🚑 补推早间报告
+        if: steps.check_morning.outputs.missing_morning == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+        run: |
+          echo "🆘 晚间workflow检测到早间报告缺失，触发早间补推"
+          gh workflow run daily-morning.yml --ref main -f force=true
+          echo "⏳ 等待早间补推完成（120秒）..."
+          sleep 120
+
+      - name: 📰 采集晚间增量新闻 & 生成报告（自愈模式）
+        id: push
         env:
           FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
           FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
@@ -41,14 +71,21 @@ jobs:
           PYTHONUNBUFFERED: 1
         run: |
           cd cloud_push
-          timeout 180 python3 main.py --mode evening 2>&1
-          echo "main.py exit=$?"
+          FORCE_FLAG=""
+          if [ "${{ github.event.inputs.force }}" = "true" ]; then
+            FORCE_FLAG="--force"
+          fi
+          timeout 1800 python3 main.py --mode evening --self-heal $FORCE_FLAG 2>&1
+          EXIT_CODE=$?
+          echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+          exit $EXIT_CODE
 
       - name: 📤 提交 HTML 报告到仓库
+        if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -f docs/ || true
+          git add -f docs/ SELFHEAL_FAILED.log 2>/dev/null || true
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
@@ -56,8 +93,27 @@ jobs:
             git push origin main
           fi
 
-      - name: 🔔 失败通知
-        if: failure()
+      # 🛡️ Layer 1 自愈: main.py 重试用尽 → workflow 级重试
+      - name: 🆘 Workflow级自愈重试
+        if: steps.push.outputs.exit_code == '2'
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
-          echo "❌ 晚间推送失败，请检查日志"
-          # 可接入 Slack/飞书 webhook 发送失败通知
+          RETRY_FILE="/tmp/evening_retry_count"
+          RETRY_COUNT=0
+          if [ -f "$RETRY_FILE" ]; then
+            RETRY_COUNT=$(cat "$RETRY_FILE")
+          fi
+          RETRY_COUNT=$((RETRY_COUNT + 1))
+          echo "$RETRY_COUNT" > "$RETRY_FILE"
+
+          if [ "$RETRY_COUNT" -le 3 ]; then
+            echo "🔄 Workflow级自愈重试 #$RETRY_COUNT（SelfHealRunner重试用尽）"
+            echo "   等待 300 秒后重新触发..."
+            sleep 300
+            gh workflow run daily-evening.yml --ref main -f force=true
+            echo "✅ 已触发自愈重试"
+          else
+            echo "🆘 Workflow级重试也已用尽（3次），放弃自动恢复"
+            echo "   请手动检查 SELFHEAL_FAILED.log"
+          fi

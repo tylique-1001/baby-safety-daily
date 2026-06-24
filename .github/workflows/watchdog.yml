@@ -24,10 +24,12 @@ jobs:
         run: |
           TODAY=$(TZ=Asia/Shanghai date +%Y-%m-%d)
           BJ_HOUR=$(TZ=Asia/Shanghai date +%H)
-          
+          BJ_MIN=$(TZ=Asia/Shanghai date +%M)
+
           echo "📅 北京时间: $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')"
           echo "today=${TODAY}" >> $GITHUB_OUTPUT
           echo "bj_hour=${BJ_HOUR}" >> $GITHUB_OUTPUT
+          echo "bj_min=${BJ_MIN}" >> $GITHUB_OUTPUT
 
           # --- 早间报告检查 (10:00-17:59) ---
           if [ "$BJ_HOUR" -ge 10 ] && [ "$BJ_HOUR" -lt 18 ]; then
@@ -63,22 +65,74 @@ jobs:
             echo "trigger_evening=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: 🚑 触发早间补推
+      # 🚑 通道1: gh CLI 触发早间补推
+      - name: 🚑 触发早间补推 (gh CLI)
+        id: trigger_morning_gh
         if: steps.check.outputs.trigger_morning == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
-          curl -sS -X POST \
-            -H "Authorization: token ${{ secrets.PAT_TOKEN }}" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/299748876/dispatches" \
-            -d '{"ref":"main"}' \
-            -w "\n补推早间 HTTP %{http_code}\n"
+          echo "🚑 触发早间补推 (gh CLI)..."
+          if gh workflow run daily-morning.yml --ref main -f force=true 2>&1; then
+            echo "✅ gh CLI 触发成功"
+            echo "gh_ok=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ gh CLI 触发失败"
+            echo "gh_ok=false" >> $GITHUB_OUTPUT
+          fi
 
-      - name: 🚑 触发晚间补推
-        if: steps.check.outputs.trigger_evening == 'true'
+      # 🆘 通道2: curl API 直调（gh CLI 失败时的兜底）
+      - name: 🆘 触发早间补推 (curl API兜底)
+        if: steps.check.outputs.trigger_morning == 'true' && steps.trigger_morning_gh.outputs.gh_ok != 'true'
+        env:
+          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
-          curl -sS -X POST \
-            -H "Authorization: token ${{ secrets.PAT_TOKEN }}" \
+          echo "🆘 gh CLI 失败，使用 curl API 直调..."
+          REPO="${{ github.repository }}"
+          HTTP=$(curl -sS -o /dev/null -w "%{http_code}" \
+            -X POST \
+            -H "Authorization: token ${PAT_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/299748886/dispatches" \
-            -d '{"ref":"main"}' \
-            -w "\n补推晚间 HTTP %{http_code}\n"
+            "https://api.github.com/repos/${REPO}/actions/workflows/daily-morning.yml/dispatches" \
+            -d '{"ref":"main","inputs":{"force":"true"}}')
+          if [ "$HTTP" = "204" ]; then
+            echo "✅ curl API 触发成功 (HTTP ${HTTP})"
+          else
+            echo "❌ curl API 也失败了 (HTTP ${HTTP})"
+          fi
+
+      # 🚑 通道1: gh CLI 触发晚间补推
+      - name: 🚑 触发晚间补推 (gh CLI)
+        id: trigger_evening_gh
+        if: steps.check.outputs.trigger_evening == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+        run: |
+          echo "🚑 触发晚间补推 (gh CLI)..."
+          if gh workflow run daily-evening.yml --ref main -f force=true 2>&1; then
+            echo "✅ gh CLI 触发成功"
+            echo "gh_ok=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ gh CLI 触发失败"
+            echo "gh_ok=false" >> $GITHUB_OUTPUT
+          fi
+
+      # 🆘 通道2: curl API 直调
+      - name: 🆘 触发晚间补推 (curl API兜底)
+        if: steps.check.outputs.trigger_evening == 'true' && steps.trigger_evening_gh.outputs.gh_ok != 'true'
+        env:
+          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+        run: |
+          echo "🆘 gh CLI 失败，使用 curl API 直调..."
+          REPO="${{ github.repository }}"
+          HTTP=$(curl -sS -o /dev/null -w "%{http_code}" \
+            -X POST \
+            -H "Authorization: token ${PAT_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${REPO}/actions/workflows/daily-evening.yml/dispatches" \
+            -d '{"ref":"main","inputs":{"force":"true"}}')
+          if [ "$HTTP" = "204" ]; then
+            echo "✅ curl API 触发成功 (HTTP ${HTTP})"
+          else
+            echo "❌ curl API 也失败了 (HTTP ${HTTP})"
+          fi

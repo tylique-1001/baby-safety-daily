@@ -5,6 +5,11 @@ on:
     # 北京时间 09:30 = UTC 01:30
     - cron: '30 1 * * *'
   workflow_dispatch:
+    inputs:
+      force:
+        description: '强制重新推送（跳过幂等保护）'
+        type: boolean
+        default: false
   push:
     paths:
       - 'cloud_push/**'
@@ -12,27 +17,29 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   push-morning:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 35  # 自愈循环最多23分钟 + 余量
     steps:
-      - name: Checkout
+      - name: 📥 Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Setup Python
+      - name: 🐍 Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: Install deps
+      - name: 📦 Install deps
         run: pip install -r cloud_push/requirements.txt
 
-      - name: Run morning pipeline
+      - name: 🚀 Run morning pipeline (自愈模式)
+        id: push
         env:
           FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
           FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
@@ -41,20 +48,54 @@ jobs:
           PYTHONUNBUFFERED: 1
         run: |
           cd cloud_push
-          timeout 180 python3 main.py --mode morning 2>&1
-          echo "main.py exit=$?"
+          FORCE_FLAG=""
+          if [ "${{ github.event.inputs.force }}" = "true" ]; then
+            FORCE_FLAG="--force"
+          fi
+          timeout 1800 python3 main.py --mode morning --self-heal $FORCE_FLAG 2>&1
+          EXIT_CODE=$?
+          echo "EXIT_CODE=$EXIT_CODE"
+          echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+          exit $EXIT_CODE
 
-      - name: Commit report
+      - name: 📤 Commit report
+        if: always()
         run: |
           set -x
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          ls -la docs/
-          git add -f docs/
+          ls -la docs/ || true
+          ls -la SELFHEAL_FAILED.log 2>/dev/null || true
+          git add -f docs/ SELFHEAL_FAILED.log 2>/dev/null || true
           git status
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
             git commit -m "Daily report $(date +%Y-%m-%d) [skip ci]"
             git push origin main
+          fi
+
+      # 🛡️ Layer 1 自愈: main.py 重试用尽 → workflow 级重试
+      - name: 🆘 Workflow级自愈重试
+        if: steps.push.outputs.exit_code == '2'
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+        run: |
+          RETRY_FILE="/tmp/morning_retry_count"
+          RETRY_COUNT=0
+          if [ -f "$RETRY_FILE" ]; then
+            RETRY_COUNT=$(cat "$RETRY_FILE")
+          fi
+          RETRY_COUNT=$((RETRY_COUNT + 1))
+          echo "$RETRY_COUNT" > "$RETRY_FILE"
+
+          if [ "$RETRY_COUNT" -le 3 ]; then
+            echo "🔄 Workflow级自愈重试 #$RETRY_COUNT（SelfHealRunner重试用尽）"
+            echo "   等待 300 秒后重新触发..."
+            sleep 300
+            gh workflow run daily-morning.yml --ref main -f force=true
+            echo "✅ 已触发自愈重试"
+          else
+            echo "🆘 Workflow级重试也已用尽（3次），放弃自动恢复"
+            echo "   请手动检查 SELFHEAL_FAILED.log"
           fi
