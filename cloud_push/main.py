@@ -86,12 +86,13 @@ def build_news_cards_html(news_list):
         if not urls:
             urls = [(source, single_url if single_url else "#")]
 
-        source_links_html = ""
-        for label, link in urls:
-            source_links_html += (
-                '<a href="' + link + '" target="_blank" rel="noopener" class="source-tag">'
-                '📖 ' + label + '</a>\n'
-            )
+        # V5 原版：每卡只展示第一个来源链接
+        primary_url = urls[0][1] if urls else (single_url if single_url else "#")
+        primary_label = urls[0][0] if urls else source
+        source_links_html = (
+            '      <a href="' + primary_url + '" target="_blank" rel="noopener" class="source-tag">'
+            '📖 查看原文 (' + primary_label + ')</a>\n'
+        )
 
         card = (
             '<div class="news-card" data-index="' + str(idx) + '">\n'
