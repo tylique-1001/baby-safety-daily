@@ -8,3 +8,4 @@ build/
 config_local.py
 *.html
 !docs/*.html
+docs/.last_push

@@ -338,6 +338,11 @@ def deploy_html_report(urgent_news, important_news, reminder_news, tips, report_
 
     print("✅ HTML 报告已生成: docs/" + filename)
 
+    # 记录推送时间到独立文件（不受 git checkout 重置 mtime 影响）
+    push_ts_file = os.path.join(docs_dir, ".last_push")
+    with open(push_ts_file, "w") as f:
+        f.write(str(datetime.datetime.now().timestamp()))
+
     # 生成公网 URL（htmlpreview.github.io — 无需 GitHub Pages，始终可渲染 HTML）
     repo = os.environ.get("GITHUB_REPOSITORY", "")
     if repo:
@@ -416,18 +421,15 @@ class SelfHealRunner:
         """单次推送尝试，返回 (exit_code, error_type, context)"""
         try:
             # 幂等保护（self-heal 模式下放宽到10分钟）
-            date_str = self.today.strftime("%Y-%m-%d")
-            filename = date_str + "-婴儿安全日报"
-            if self.is_evening:
-                filename += "-晚间更新"
-            filename += ".html"
+            # 使用 .last_push 文件而不是 HTML 的 mtime，防止 git checkout 重置时间戳
             docs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "docs")
-            target_file = os.path.join(docs_dir, filename)
-            if os.path.exists(target_file):
-                mtime = os.path.getmtime(target_file)
-                age_minutes = (datetime.datetime.now().timestamp() - mtime) / 60
+            push_ts_file = os.path.join(docs_dir, ".last_push")
+            if os.path.exists(push_ts_file):
+                with open(push_ts_file, "r") as f:
+                    last_ts = float(f.read().strip())
+                age_minutes = (datetime.datetime.now().timestamp() - last_ts) / 60
                 if age_minutes < 10:
-                    print("⏭️  报告已存在（" + str(int(age_minutes)) + "分钟前生成），跳过重复推送", flush=True)
+                    print("⏭️  最近推送（" + str(int(age_minutes)) + "分钟前），跳过重复推送", flush=True)
                     return (0, None, None)
 
             print("🚀 开始执行云端推送 (mode=" + self.mode + ", date=" + str(self.today) + ", 第" + str(self.retry_count + 1) + "次尝试)", flush=True)
@@ -549,22 +551,19 @@ def main():
     is_evening = args.mode == "evening"
 
     # 🛡️ 幂等保护（--force 可跳过）
+    # 使用 .last_push 文件而不是 HTML 的 mtime，防止 git checkout 重置时间戳
     if not args.force:
-        date_str = today.strftime("%Y-%m-%d")
-        filename = date_str + "-婴儿安全日报"
-        if is_evening:
-            filename += "-晚间更新"
-        filename += ".html"
         docs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "docs")
-        target_file = os.path.join(docs_dir, filename)
-        if os.path.exists(target_file):
-            mtime = os.path.getmtime(target_file)
-            age_minutes = (datetime.datetime.now().timestamp() - mtime) / 60
+        push_ts_file = os.path.join(docs_dir, ".last_push")
+        if os.path.exists(push_ts_file):
+            with open(push_ts_file, "r") as f:
+                last_ts = float(f.read().strip())
+            age_minutes = (datetime.datetime.now().timestamp() - last_ts) / 60
             if age_minutes < 10:  # self-heal 模式下放宽到10分钟
-                print("⏭️  报告已存在（" + str(int(age_minutes)) + "分钟前生成），跳过重复推送", flush=True)
+                print("⏭️  最近推送（" + str(int(age_minutes)) + "分钟前），跳过重复推送", flush=True)
                 return 0
             else:
-                print("⏳ 报告已存在但过期（" + str(int(age_minutes)) + "分钟前），重新生成", flush=True)
+                print("⏳ 上次推送已超过（" + str(int(age_minutes)) + "分钟前），重新生成", flush=True)
 
     # 🛡️ Self-heal 模式：启动自愈引擎
     if args.self_heal:
