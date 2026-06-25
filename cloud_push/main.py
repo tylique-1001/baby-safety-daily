@@ -3,6 +3,7 @@
 """
 main.py - 云端推送主入口
 GitHub Actions 调用此脚本完成完整推送流程
+V5 极简视觉 + 全部功能改进（14品类 / 3天过滤 / 自愈引擎 / 幂等保护）
 
 使用方式：
   python3 main.py --mode morning   # 早间版（全天报告）
@@ -20,12 +21,12 @@ import argparse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from news_fetcher import fetch_news, format_for_report
-from feishu_sender import send_daily_report
+from feishu_sender import send_daily_report, send_daily_report_with_retry
 from config import CLOUDSTUDIO_SUBDOMAIN
 
 
 def get_tips(date):
-    """获取当日安全贴士（可后续接入 API）"""
+    """获取当日安全贴士"""
     tips_pool = [
         "定期检查婴儿用品是否有召回信息，可访问 CPSC.gov 查询。",
         "婴儿食品引入新食材时，每次只引入一种，观察 3-5 天有无过敏反应。",
@@ -61,7 +62,7 @@ def is_valid_url(url):
 
 
 def build_news_cards_html(news_list):
-    """构建新闻卡片 HTML（V5 风格：统一珊瑚左边框）"""
+    """构建新闻卡片 HTML（V5 极简风格：标题+正文+源链接）"""
     cards_html = ""
     for idx, news in enumerate(news_list):
         is_urgent = news.get("severity") == "urgent"
@@ -73,12 +74,10 @@ def build_news_cards_html(news_list):
         desc = news.get("desc", title)
         categories = news.get("categories", ["日常用品"])
 
-        # 品类芯片
-        cat_html = ""
-        for cat in categories:
-            cat_html += '<span class="cat-chip">' + cat + '</span>'
+        # 品类 → 简单文字（非芯片UI，V5风格）
+        cat_text = " · ".join(categories)
 
-        # 来源链接
+        # 多源链接 → 构建 source row
         urls = news.get("urls", [])
         single_url = news.get("url", "")
         existing_urls = set(link for _, link in urls)
@@ -87,19 +86,11 @@ def build_news_cards_html(news_list):
         if not urls:
             urls = [(source, single_url if single_url else "#")]
 
-        url_count = len(urls)
-        max_visible = 3
         source_links_html = ""
-        for j, (label, link) in enumerate(urls):
-            extra_class = " source-extra" if j >= max_visible else ""
+        for label, link in urls:
             source_links_html += (
-                '      <a href="' + link + '" target="_blank" rel="noopener" class="source-tag' + extra_class + '">'
+                '<a href="' + link + '" target="_blank" rel="noopener" class="source-tag">'
                 '📖 ' + label + '</a>\n'
-            )
-        if url_count > max_visible:
-            source_links_html += (
-                '      <button class="source-more-btn has-more" onclick="toggleMoreSources(event,' + str(idx) + ')">'
-                '📋 +' + str(url_count - max_visible) + ' 更多来源 ▼</button>\n'
             )
 
         card = (
@@ -109,10 +100,9 @@ def build_news_cards_html(news_list):
             '    <span class="card-arrow">▼</span>\n'
             '  </div>\n'
             '  <div class="card-body">\n'
-            '    <div class="card-meta">📅 ' + date_str + ' | 来源：' + source + '</div>\n'
-            '    <div class="cat-row">' + cat_html + '</div>\n'
-            '    <p class="card-desc">' + desc + '</p>\n'
-            '    <div class="source-row" id="src-row-' + str(idx) + '">\n'
+            '    <p>📅 ' + date_str + ' | 来源：' + source + ' | 📂 ' + cat_text + '</p>\n'
+            '    <p>' + desc + '</p>\n'
+            '    <div class="source-row">\n'
             + source_links_html +
             '    </div>\n'
             '  </div>\n'
@@ -123,13 +113,12 @@ def build_news_cards_html(news_list):
 
 
 def generate_html_report(urgent_news, important_news, reminder_news, tips, report_date, mode):
-    """生成完整 HTML 报告（V5 极简风格 — 无进度条/导航/分区/底栏）"""
+    """生成完整 HTML 报告（V5 极简风格 — 3栏统计 + 平铺卡片 + 贴士）"""
     date_str = report_date.strftime("%Y年%m月%d日")
     title = "婴儿安全资讯日报 · " + ("晚间更新" if mode == "evening" else "早间版")
 
     n_urgent = len(urgent_news)
-    n_important = len(important_news)
-    n_reminder = len(reminder_news)
+    n_important = len(important_news) + len(reminder_news)  # 重要+提醒合并显示
 
     # 合并所有新闻（V5 风格：平铺列表，无分区）
     all_news = urgent_news + important_news + reminder_news
@@ -140,16 +129,7 @@ def generate_html_report(urgent_news, important_news, reminder_news, tips, repor
     for tip in tips:
         tips_html += '<div class="tip-card">💡 ' + tip + '</div>\n'
 
-    # 统计
-    stats_html = (
-        '<div class="stats">\n'
-        '  <div class="stat-card"><div class="num">' + str(n_urgent) + '</div><div class="label">🔴 紧急</div></div>\n'
-        '  <div class="stat-card"><div class="num">' + str(n_important) + '</div><div class="label">🟡 重要</div></div>\n'
-        '  <div class="stat-card"><div class="num">' + str(n_reminder) + '</div><div class="label">🟠 提醒</div></div>\n'
-        '  <div class="stat-card"><div class="num">' + str(len(tips)) + '</div><div class="label">💡 贴士</div></div>\n'
-        '</div>\n'
-    )
-
+    # 完整 HTML（V5 原版 CSS + 结构）
     html = (
         '<!DOCTYPE html>\n'
         '<html lang="zh-CN">\n'
@@ -170,12 +150,10 @@ def generate_html_report(urgent_news, important_news, reminder_news, tips, repor
         '    .hero { background: linear-gradient(135deg, var(--coral), var(--red)); color: white; padding: 30px; border-radius: 20px; margin-bottom: 20px; }\n'
         '    .hero h1 { font-size: 24px; margin-bottom: 8px; }\n'
         '    .hero p { opacity: 0.9; font-size: 14px; }\n'
-        '    /* ---- 统计卡片 ---- */\n'
         '    .stats { display: flex; gap: 12px; margin-bottom: 20px; }\n'
         '    .stat-card { flex: 1; background: var(--card); padding: 16px; border-radius: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); text-align: center; }\n'
         '    .stat-card .num { font-size: 28px; font-weight: 700; color: var(--coral); }\n'
         '    .stat-card .label { font-size: 12px; color: var(--text-2); }\n'
-        '    /* ---- 新闻卡片 ---- */\n'
         '    .news-card { background: var(--card); border-radius: 14px; margin-bottom: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }\n'
         '    .card-header { padding: 14px 18px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; border-left: 4px solid var(--coral); }\n'
         '    .card-header:hover { background: #fef2f2; }\n'
@@ -184,33 +162,10 @@ def generate_html_report(urgent_news, important_news, reminder_news, tips, repor
         '    .severity-danger { color: var(--red); font-weight: 600; }\n'
         '    .severity-prevent { color: var(--amber); font-weight: 600; }\n'
         '    .card-arrow { transition: transform 0.3s; }\n'
-        '    .card-meta { font-size: 13px; color: var(--text-2); margin-bottom: 6px; }\n'
-        '    .card-desc { font-size: 14px; line-height: 1.7; margin-bottom: 10px; }\n'
-        '    /* ---- 品类芯片 ---- */\n'
-        '    .cat-row { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px; }\n'
-        '    .cat-chip { display: inline-block; padding: 3px 8px; background: #F3F4F6; color: var(--text-2); border-radius: 4px; font-size: 12px; }\n'
-        '    /* ---- 来源链接 ---- */\n'
-        '    .source-row { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }\n'
+        '    .source-row { margin-top: 10px; }\n'
         '    .source-tag { display: inline-block; padding: 4px 10px; background: #FFF3F2; color: var(--coral); border-radius: 6px; text-decoration: none; font-size: 13px; }\n'
         '    .source-tag:hover { opacity: 0.8; }\n'
-        '    .source-tag.source-extra { display: none; }\n'
-        '    .source-row.expanded .source-extra { display: inline-block; }\n'
-        '    .source-more-btn { padding: 4px 10px; background: #f1f5f9; color: var(--text-2); border: 1px solid #e2e8f0; border-radius: 6px; font-size: 13px; cursor: pointer; font-family: var(--sans); }\n'
-        '    .source-more-btn:hover { background: #e2e8f0; }\n'
-        '    .has-more { font-weight: 500; }\n'
-        '    /* ---- 贴士 ---- */\n'
         '    .tip-card { background: #EFF6FF; border-left: 4px solid var(--blue); padding: 12px 16px; border-radius: 14px; margin-bottom: 8px; font-size: 14px; }\n'
-        '    html.scroll-restoring{visibility:hidden}\n'
-        '    @media print {\n'
-        '      body { background: white; max-width: 100%; padding: 0; }\n'
-        '      .hero { background: none; color: var(--text); border: 2px solid var(--coral); }\n'
-        '      .stats { display: none; }\n'
-        '      .news-card { break-inside: avoid; box-shadow: none; border: 1px solid #e2e8f0; }\n'
-        '      .card-body { display: block !important; }\n'
-        '      .card-arrow { display: none; }\n'
-        '      .source-more-btn { display: none; }\n'
-        '      .source-extra { display: inline-block !important; }\n'
-        '    }\n'
         '  </style>\n'
         '  <script>\n'
         '  (function(){\n'
@@ -223,21 +178,25 @@ def generate_html_report(urgent_news, important_news, reminder_news, tips, repor
         '<body>\n'
         '  <div class="hero">\n'
         '    <h1>🛡️ ' + title + '</h1>\n'
-        '    <p>' + date_str + ' | 重点关注 1-2 岁婴幼儿安全动态</p>\n'
-        '    <p style="margin-top:8px;font-size:13px;">⏱️ 阅读时长约 ' + str(n_urgent + n_important + n_reminder + len(tips) + 1) + ' 分钟</p>\n'
+        '    <p>' + date_str + ' | 重点关注婴儿安全动态</p>\n'
+        '    <p style="margin-top:8px;font-size:13px;">⏱️ 阅读时长约 ' + str(n_urgent + n_important + len(tips) + 2) + ' 分钟</p>\n'
         '  </div>\n'
-        + stats_html +
+        '  <div class="stats">\n'
+        '    <div class="stat-card"><div class="num">' + str(n_urgent) + '</div><div class="label">🔴 紧急</div></div>\n'
+        '    <div class="stat-card"><div class="num">' + str(n_important) + '</div><div class="label">🟡 重要/提醒</div></div>\n'
+        '    <div class="stat-card"><div class="num">' + str(len(tips)) + '</div><div class="label">💡 贴士</div></div>\n'
+        '  </div>\n'
         '  <h2 style="margin:20px 0 12px;font-size:18px;">📰 安全资讯</h2>\n'
         + news_cards_html +
         '  <h2 style="margin:20px 0 12px;font-size:18px;">💡 安全贴士</h2>\n'
         + tips_html +
         '  <hr style="margin:30px 0 20px;border:none;border-top:1px solid #e2e8f0;">\n'
         '  <p style="text-align:center;color:var(--text-2);font-size:13px;">\n'
-        '    📊 数据来源：市场监管总局 · 中国质量新闻网 · 央视新闻 · 财新<br>\n'
+        '    📊 数据来源：CPSC · FDA · 中国市场监管总局 · 中国质量报<br>\n'
         '    ⚠️ 本日报仅供参考，具体操作请遵循官方指导。\n'
         '  </p>\n'
         '  <script>\n'
-        '  /* ── 卡片折叠/展开 ── */\n'
+        '  // 卡片折叠/展开\n'
         '  function toggleCard(idx) {\n'
         '    var card = document.querySelector(\'.news-card[data-index="\'+idx+\'"]\');\n'
         '    if(card) {\n'
@@ -247,22 +206,7 @@ def generate_html_report(urgent_news, important_news, reminder_news, tips, repor
         '      else { body.classList.add(\'open\'); arrow.style.transform = \'rotate(180deg)\'; }\n'
         '    }\n'
         '  }\n'
-        '  /* ── 源链接截断：展开/收起 ── */\n'
-        '  function toggleMoreSources(e, idx) {\n'
-        '    e.stopPropagation();\n'
-        '    var row = document.getElementById(\'src-row-\' + idx);\n'
-        '    if(row) {\n'
-        '      var btn = row.querySelector(\'.source-more-btn\');\n'
-        '      if(row.classList.contains(\'expanded\')) {\n'
-        '        row.classList.remove(\'expanded\');\n'
-        '        if(btn) btn.innerHTML = btn.innerHTML.replace(\'▲\', \'▼\');\n'
-        '      } else {\n'
-        '        row.classList.add(\'expanded\');\n'
-        '        if(btn) btn.innerHTML = btn.innerHTML.replace(\'▼\', \'▲\');\n'
-        '      }\n'
-        '    }\n'
-        '  }\n'
-        '  /* 🔙 滚动位置保存/恢复 v5 */\n'
+        '  // 🔙 滚动位置保存/恢复 v3\n'
         '  (function(){\n'
         '    var STORAGE_KEY = \'_daily_rpt_state\';\n'
         '    function getCardAnchor() {\n'
@@ -344,11 +288,10 @@ def deploy_html_report(urgent_news, important_news, reminder_news, tips, report_
     with open(push_ts_file, "w") as f:
         f.write(str(datetime.datetime.now().timestamp()))
 
-    # 生成公网 URL（htmlpreview.github.io — 无需 GitHub Pages，始终可渲染 HTML）
+    # 生成访问 URL（htmlpreview.github.io）
     repo = os.environ.get("GITHUB_REPOSITORY", "")
     if repo:
-        raw_url = "https://raw.githubusercontent.com/" + repo + "/main/docs/" + filename
-        url = "https://htmlpreview.github.io/?" + raw_url
+        url = "https://" + repo.split("/")[0] + ".github.io/" + repo.split("/")[1] + "/docs/" + filename
         return url, filepath
 
     return None, filepath
@@ -356,17 +299,14 @@ def deploy_html_report(urgent_news, important_news, reminder_news, tips, report_
 
 # ═══════════════════════════════════════════════════════════════
 # 🛡️ SelfHealRunner — 无限自愈引擎
-# 推送失败 → 自动诊断 → 修复 → 重试 → 直到成功
-# 退出码: 0=成功, 2=重试用尽(触发workflow级救援), 1=致命错误
 # ═══════════════════════════════════════════════════════════════
 
 class SelfHealRunner:
     """无限自愈循环：包裹完整推送流程，失败自动诊断修复重试"""
 
     MAX_RETRIES = 8
-    BASE_DELAY = 15  # 基础退避秒数
-    MAX_DELAY = 300  # 最大退避秒数（5分钟）
-    # 总最长时间 ≈ 15+30+60+120+240+300+300+300 = 1365s ≈ 23min
+    BASE_DELAY = 15
+    MAX_DELAY = 300
 
     def __init__(self, mode):
         self.mode = mode
@@ -377,52 +317,37 @@ class SelfHealRunner:
         self.is_evening = mode == "evening"
 
     def _log_fix(self, category, detail):
-        """记录修复动作"""
         entry = f"[自愈·{category}] {detail}"
         self.fixes_applied.append(entry)
         self.diagnosis_log.append(entry)
         print("🔧 " + entry, flush=True)
 
     def _diagnose(self, error_type, context):
-        """诊断失败原因，返回修复建议列表"""
         fixes = []
-
         if error_type == "empty_news":
-            # 没有采集到新闻 → 扩大搜索范围
             fixes.append(("widen_search", "扩大搜索范围(days_back+3)"))
             self._log_fix("empty_news", "0条新闻，将扩大搜索范围")
-
         elif error_type == "feishu_auth_fail":
-            # 飞书认证失败 → 等一会重试（可能是临时网络问题）
             fixes.append(("retry_auth", "等待后重试飞书认证"))
             self._log_fix("feishu_auth", "飞书认证失败，将重试")
-
         elif error_type == "feishu_send_fail":
-            # 飞书发送失败 → 可能是卡片格式问题，尝试简化
             fixes.append(("retry_send", "重试发送"))
             self._log_fix("feishu_send", "飞书发送失败，将重试")
-
         elif error_type == "network_error":
-            # 网络错误 → 增加超时时间
             fixes.append(("increase_timeout", "增加网络超时"))
             self._log_fix("network", "网络超时，增加等待时间")
-
         elif error_type == "exception":
             error_msg = context.get("error", "unknown")
             fixes.append(("retry", f"捕获异常后重试: {error_msg[:80]}"))
             self._log_fix("exception", f"捕获异常: {error_msg[:80]}")
-
         else:
             fixes.append(("retry", f"未知错误类型 {error_type}，直接重试"))
             self._log_fix("unknown", f"未知错误: {error_type}")
-
         return fixes
 
     def _attempt_push(self):
-        """单次推送尝试，返回 (exit_code, error_type, context)"""
         try:
-            # 幂等保护（self-heal 模式下放宽到10分钟）
-            # 使用 .last_push 文件而不是 HTML 的 mtime，防止 git checkout 重置时间戳
+            # 幂等保护：使用 .last_push 文件（不受 git checkout 重置 mtime 影响）
             docs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "docs")
             push_ts_file = os.path.join(docs_dir, ".last_push")
             if os.path.exists(push_ts_file):
@@ -438,14 +363,13 @@ class SelfHealRunner:
             # 根据重试次数动态调整搜索天数
             days_back = 3 if not self.is_evening else 1
             if self.retry_count >= 3:
-                days_back += 2  # 第3次重试扩大搜索
+                days_back += 2
             if self.retry_count >= 6:
-                days_back += 3  # 第6次重试更激进
+                days_back += 3
 
             news_items = fetch_news(days_back=days_back, mode=self.mode)
             print("[TRACE] fetch_news done, " + str(len(news_items)) + " items", flush=True)
 
-            # 没有新闻 → 诊断
             if len(news_items) == 0:
                 return (2, "empty_news", {"count": 0})
 
@@ -462,7 +386,6 @@ class SelfHealRunner:
             print("   Cloud URL: " + str(cloud_url or "(需要设置 GITHUB_REPOSITORY)"), flush=True)
 
             print("📤 发送飞书消息...", flush=True)
-            from feishu_sender import send_daily_report_with_retry
             success = send_daily_report_with_retry(
                 urgent_news=urgent,
                 important_news=important,
@@ -483,7 +406,6 @@ class SelfHealRunner:
             return (2, "exception", {"error": str(e)})
 
     def run(self):
-        """主入口：无限自愈循环"""
         print("=" * 60, flush=True)
         print("🛡️ SelfHealRunner 启动 (mode=" + self.mode + ")", flush=True)
         print("   最大重试: " + str(self.MAX_RETRIES) + " 次", flush=True)
@@ -504,19 +426,17 @@ class SelfHealRunner:
                         print("   " + fix, flush=True)
                 return 0
 
-            # 失败 → 诊断
             fixes = self._diagnose(error_type, context or {})
             if not fixes:
                 print("⚠️ 无法诊断，直接重试", flush=True)
 
-            # 指数退避等待
             delay = min(self.BASE_DELAY * (2 ** (attempt - 1)), self.MAX_DELAY)
             print("⏳ 等待 " + str(delay) + " 秒后重试...", flush=True)
             time.sleep(delay)
 
-        # 🔴 所有重试用尽
+        # 所有重试用尽
         print("\n" + "=" * 60, flush=True)
-        print("🆘 自愈循环耗尽！10次重试全部失败", flush=True)
+        print("🆘 自愈循环耗尽！" + str(self.MAX_RETRIES) + "次重试全部失败", flush=True)
         print("📋 诊断记录:", flush=True)
         for entry in self.diagnosis_log:
             print("   " + entry, flush=True)
@@ -524,7 +444,6 @@ class SelfHealRunner:
         for entry in self.fixes_applied:
             print("   " + entry, flush=True)
 
-        # 写诊断文件供 workflow 读取
         diag_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "SELFHEAL_FAILED.log")
         with open(diag_file, "w") as f:
             f.write("SelfHealRunner exhausted after " + str(self.MAX_RETRIES) + " retries\n")
@@ -538,7 +457,7 @@ class SelfHealRunner:
 
         print("📝 诊断日志已写入 SELFHEAL_FAILED.log", flush=True)
         print("=" * 60, flush=True)
-        return 2  # 特殊退出码：触发 workflow 级救援
+        return 2
 
 
 def main():
@@ -551,8 +470,7 @@ def main():
     today = datetime.date.today()
     is_evening = args.mode == "evening"
 
-    # 🛡️ 幂等保护（--force 可跳过）
-    # 使用 .last_push 文件而不是 HTML 的 mtime，防止 git checkout 重置时间戳
+    # 幂等保护（使用 .last_push 文件，不受 git checkout 重置 mtime 影响）
     if not args.force:
         docs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "docs")
         push_ts_file = os.path.join(docs_dir, ".last_push")
@@ -560,13 +478,13 @@ def main():
             with open(push_ts_file, "r") as f:
                 last_ts = float(f.read().strip())
             age_minutes = (datetime.datetime.now().timestamp() - last_ts) / 60
-            if age_minutes < 10:  # self-heal 模式下放宽到10分钟
+            if age_minutes < 10:
                 print("⏭️  最近推送（" + str(int(age_minutes)) + "分钟前），跳过重复推送", flush=True)
                 return 0
             else:
                 print("⏳ 上次推送已超过（" + str(int(age_minutes)) + "分钟前），重新生成", flush=True)
 
-    # 🛡️ Self-heal 模式：启动自愈引擎
+    # Self-heal 模式
     if args.self_heal:
         runner = SelfHealRunner(args.mode)
         return runner.run()
@@ -590,7 +508,6 @@ def main():
     print("   Cloud URL: " + str(cloud_url or "(需要设置 GITHUB_REPOSITORY)"), flush=True)
 
     print("📤 发送飞书消息...", flush=True)
-    from feishu_sender import send_daily_report_with_retry
     success = send_daily_report_with_retry(
         urgent_news=urgent,
         important_news=important,
